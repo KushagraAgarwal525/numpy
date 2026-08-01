@@ -2209,11 +2209,15 @@ def pinv(a, rcond=None, hermitian=False, *, rtol=_NoValue):
 
     """
     a, wrap = _makearray(a)
+    # Promoted inexact dtype used by the SVD path (via `_commonType`).
+    # Needed for Array API `rtol=None` on integer inputs, and to keep the
+    # empty-matrix early return dtype consistent with the non-empty path.
+    _, result_t = _commonType(a)
     if rcond is None:
         if rtol is _NoValue:
             rcond = 1e-15
         elif rtol is None:
-            rcond = max(a.shape[-2:]) * finfo(a.dtype).eps
+            rcond = max(a.shape[-2:]) * finfo(result_t).eps
         else:
             rcond = rtol
     elif rtol is not _NoValue:
@@ -2225,7 +2229,7 @@ def pinv(a, rcond=None, hermitian=False, *, rtol=_NoValue):
     rcond = asarray(rcond)
     if _is_empty_2d(a):
         m, n = a.shape[-2:]
-        res = empty(a.shape[:-2] + (n, m), dtype=a.dtype)
+        res = empty(a.shape[:-2] + (n, m), dtype=result_t)
         return wrap(res)
     a = a.conjugate()
     u, s, vt = svd(a, full_matrices=False, hermitian=hermitian)

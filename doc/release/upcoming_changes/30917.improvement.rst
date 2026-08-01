@@ -1,0 +1,7 @@
+``np.linalg.pinv(..., rtol=None)`` accepts integer arrays
+---------------------------------------------------------
+Calling ``numpy.linalg.pinv`` with the Array API default ``rtol=None`` no
+longer raises ``ValueError`` for integer-dtype inputs.  The cutoff is now
+derived from the promoted inexact linear-algebra dtype (the same type used by
+the SVD path).  Empty integer matrices also return that promoted dtype,
+matching non-empty results.

@@ -30,7 +30,7 @@ from numpy import (
 from numpy._core import swapaxes
 from numpy.exceptions import AxisError
 from numpy.linalg import LinAlgError, matrix_power, matrix_rank, multi_dot, norm
-from numpy.linalg._linalg import _multi_dot_matrix_chain_order
+from numpy.linalg._linalg import _commonType, _multi_dot_matrix_chain_order
 from numpy.testing import (
     HAS_LAPACK64,
     HAS_SUBPROCESSES,
@@ -950,6 +950,26 @@ def test_pinv_rtol_arg():
         ValueError, match=r"`rtol` and `rcond` can't be both set."
     ):
         np.linalg.pinv(a, rcond=0.5, rtol=0.5)
+
+
+@pytest.mark.parametrize("dtype", [np.int32, np.int64])
+def test_pinv_rtol_none_integer(dtype):
+    # gh-30917: Array API rtol=None must not call finfo on the integer dtype.
+    a = np.array([[1, 2], [3, 4]], dtype=dtype)
+    expected = np.linalg.pinv(a.astype(np.float64), rtol=None)
+    actual = np.linalg.pinv(a, rtol=None)
+    assert_almost_equal(actual, expected)
+    assert actual.dtype == expected.dtype
+
+
+@pytest.mark.parametrize("dtype", [np.int32, np.float32, np.float64])
+def test_pinv_empty_result_dtype(dtype):
+    # Empty early-return dtype should match the SVD / _commonType path.
+    a = np.empty((0, 2), dtype=dtype)
+    res = np.linalg.pinv(a)
+    _, result_t = _commonType(np.asarray(a))
+    assert res.shape == (2, 0)
+    assert res.dtype == np.dtype(result_t)
 
 
 class DetCases(LinalgSquareTestCase, LinalgGeneralizedSquareTestCase):
