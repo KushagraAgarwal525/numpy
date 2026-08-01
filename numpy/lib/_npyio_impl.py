@@ -1717,7 +1717,16 @@ def fromregex(file, regexp, dtype, encoding=None):
             output = np.array(seq, dtype=newdtype)
             output = output.view(dtype)
         else:
-            output = np.array(seq, dtype=dtype)
+            # Support structured dtypes with subarrays / nested fields by
+            # first building with a flattened dtype, then reinterpreting
+            # (same approach as genfromtxt; see gh-8812).
+            dtype_flat = flatten_dtype(dtype, flatten_base=True)
+            if (len(dtype_flat) > len(dtype.names or ()) and
+                    'O' not in (dt.char for dt in dtype_flat)):
+                rows = np.array(seq, dtype=[('', dt) for dt in dtype_flat])
+                output = rows.view(dtype)
+            else:
+                output = np.array(seq, dtype=dtype)
 
         return output
     finally:
