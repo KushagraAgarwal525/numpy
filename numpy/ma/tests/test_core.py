@@ -3942,13 +3942,20 @@ class TestMaskedArrayMethods:
         assert_equal(x.take([0, 1]), x)
 
     def test_take_object(self):
-        # Object elements may themselves be ndarrays; wrapping indices avoids
-        # treating those nested arrays as the take() result (gh-9206).
-        nested = np.array([1, 2])
-        x = masked_array([None, nested], mask=[0, 1], dtype=object)
+        # Object scalars lack [...]; nested ndarrays must stay wrapped so take
+        # does not treat them as the result array (gh-9206).
+        x = masked_array([None, {'a': 1}], mask=[0, 1], dtype=object)
         assert_equal(x.take(0), None)
         assert_(x.take(1) is np.ma.masked)
         assert_equal(x.take([0, 1]), x)
+
+        nested = np.array([1, 2])
+        y = masked_array([None, nested], mask=[0, 1], dtype=object)
+        assert_equal(y.take(0), None)
+        # Indexing a masked object element that holds an ndarray has the same
+        # quirk as take: both return a masked view of the nested array.
+        assert_equal(y.take(1), y[1])
+        assert_equal(y.take([0, 1]), y)
 
     def test_take_masked_indices(self):
         # Test take w/ masked indices
