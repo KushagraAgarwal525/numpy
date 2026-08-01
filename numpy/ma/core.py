@@ -6273,25 +6273,30 @@ class MaskedArray(ndarray):
         maskindices = getmask(indices)
         if maskindices is not nomask:
             indices = indices.filled(0)
-        # Get the data, promoting scalars to 0d arrays with [...] so that
-        # .view works correctly.  np.str_/np.bytes_/object scalars (and other
-        # types that do not support [...]) must be wrapped first; otherwise
-        # take() raises TypeError for otherwise-valid scalar indexing.
+        # Get the data as an array so .view(MaskedArray) works.  ndarray.take
+        # returns a scalar for scalar indices; np.str_/np.bytes_ scalars and
+        # object elements (including nested ndarrays) do not support the [...]
+        # promotion previously used here (gh-9206).  Wrap indices in a list so
+        # take always returns an ndarray, then squeeze the extra axis away.
+        if axis is not None:
+            axis = mu.normalize_axis_index(axis, self.ndim)
         if out is None:
-            taken = _data.take(indices, axis=axis, mode=mode)
-            if not isinstance(taken, ndarray):
-                tmp = np.empty((), dtype=_data.dtype)
-                tmp[()] = taken
-                taken = tmp
-            out = taken[...].view(cls)
+            out_aug = _data.take([indices], axis=axis, mode=mode)
+            out = out_aug.squeeze(axis=0 if axis is None else axis).view(cls)
+            take_indices = [indices]
+            squeeze_axis = 0 if axis is None else axis
         else:
             np.take(_data, indices, axis=axis, mode=mode, out=out)
+            take_indices = indices
+            squeeze_axis = None
         # Get the mask
         if isinstance(out, MaskedArray):
             if _mask is nomask:
                 outmask = maskindices
             else:
-                outmask = _mask.take(indices, axis=axis, mode=mode)
+                outmask = _mask.take(take_indices, axis=axis, mode=mode)
+                if squeeze_axis is not None:
+                    outmask = outmask.squeeze(axis=squeeze_axis)
                 outmask |= maskindices
             out.__setmask__(outmask)
         # demote 0d arrays back to scalars, for consistency with ndarray.take
