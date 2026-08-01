@@ -18,17 +18,17 @@ ensure_upstream() {
   git fetch upstream main --tags --prune
 }
 
-read_last_built_sha() {
+read_build_state_field() {
+  local field="$1"
   if [[ ! -f "$STATE_FILE" ]]; then
     echo ""
     return
   fi
-  python3 - <<'PY'
+  python3 - <<PY
 import json
 from pathlib import Path
-p = Path(".cursor/build-state.json")
 try:
-    print(json.loads(p.read_text()).get("upstream_sha", ""))
+    print(json.loads(Path(".cursor/build-state.json").read_text()).get("$field", "") or "")
 except Exception:
     print("")
 PY
@@ -52,8 +52,21 @@ PY
 }
 
 smoke_numpy() {
-  # Never plain `import numpy` from repo root — that loads the source tree, not the build.
-  spin python -c "import numpy as np; print('numpy_ok', np.__version__, np.__file__)"
+  # `spin python -c` fails (click eats -c). Use -- to forward args to Python.
+  # Also prefer a temp script outside the repo so cwd import traps cannot win.
+  local script
+  script="$(mktemp /tmp/numpy-smoke.XXXXXX.py)"
+  cat > "$script" <<'PY'
+import numpy as np
+print("numpy_ok", np.__version__, np.__file__)
+PY
+  # shellcheck disable=SC2064
+  trap "rm -f '$script'" RETURN
+  if spin python -- "$script"; then
+    return 0
+  fi
+  # Fallback: explicit -c after --
+  spin python -- -c "import numpy as np; print('numpy_ok', np.__version__, np.__file__)"
 }
 
 ensure_venv_and_deps() {
@@ -69,7 +82,6 @@ ensure_venv_and_deps() {
   python -m pip install -r requirements/build_requirements.txt
   python -m pip install -r requirements/test_requirements.txt
   python -m pip install -r requirements/hypothesis_requirements.txt
-  # Lint tools are optional for runtime; install lightly so spin lint works when needed.
   python -m pip install -r requirements/linter_requirements.txt
 
   if ! grep -q 'source .venv/bin/activate' ~/.bashrc 2>/dev/null; then
@@ -100,8 +112,9 @@ sync_if_needed() {
 
 ensure_upstream
 UPSTREAM_SHA="$(git rev-parse upstream/main)"
-LAST_BUILT_SHA="$(read_last_built_sha)"
-echo "upstream/main=$UPSTREAM_SHA last_built=${LAST_BUILT_SHA:-<none>}"
+LAST_BUILT_SHA="$(read_build_state_field upstream_sha)"
+LAST_STATUS="$(read_build_state_field status)"
+echo "upstream/main=$UPSTREAM_SHA last_built=${LAST_BUILT_SHA:-<none>} status=${LAST_STATUS:-<none>}"
 
 SYNCED=0
 if sync_if_needed; then
@@ -113,7 +126,7 @@ ensure_venv_and_deps
 NEED_BUILD=0
 if [[ "$SYNCED" -eq 1 ]]; then
   NEED_BUILD=1
-elif [[ "$LAST_BUILT_SHA" != "$UPSTREAM_SHA" ]]; then
+elif [[ "$LAST_STATUS" != "ok" || "$LAST_BUILT_SHA" != "$UPSTREAM_SHA" ]]; then
   NEED_BUILD=1
 elif ! smoke_numpy; then
   echo "Smoke check failed against cached build; rebuilding."

@@ -17,14 +17,18 @@ This fork is configured for Cursor Cloud Agents via `.cursor/environment.json`.
 
 ### Smoke / import rules
 - Always activate: `source .venv/bin/activate`
-- Use `spin python`, `spin test`, `spin build` — never bare `python -c "import numpy"` or `pytest` from the repo root (imports the source tree and breaks).
+- Use `spin python`, `spin test`, `spin build`.
+- Never bare `python -c "import numpy"` or `pytest` from the repo root.
+- One-liners: `spin python -- -c "import numpy as np; print(np.__version__)"` (note the `--`).
 
 ### Build / test
 - Rebuild after C/Cython edits: `spin build`
-- Narrow tests preferred:
-  - `spin test -v -t numpy/_core/tests/test_multiarray.py`
+- During development, narrow tests are fine for iteration:
   - `spin test -v -t path/to/test_file.py::test_name`
-- Lint: `spin lint`
+- **Before opening any draft PR, you MUST run the full test suite and it MUST pass:**
+  - `spin test -v`
+  - Do not open a PR if the full suite fails, is incomplete, or was skipped.
+- Lint touched Python before PR: `spin lint`
 
 ### Issue tracking
 - Read/update `.cursor/issue-state.json` (`completed` / `attempted` / `skipped`) so later runs do not repeat work.
@@ -34,4 +38,4 @@ This fork is configured for Cursor Cloud Agents via `.cursor/environment.json`.
 - Branch from up-to-date `main` after install finishes.
 - Minimal diffs; match local style; no drive-by refactors.
 - **Draft PRs only** against this fork's `main` (never against upstream).
-- No PR unless verification for the changed area passed.
+- No PR unless **full** `spin test -v` passed for that branch.
