@@ -966,10 +966,12 @@ def test_pinv_rtol_none_integer(dtype):
 def test_pinv_empty_result_dtype(dtype):
     # Empty early-return dtype should match the SVD / _commonType path.
     a = np.empty((0, 2), dtype=dtype)
-    res = np.linalg.pinv(a)
     _, result_t = _commonType(np.asarray(a))
-    assert res.shape == (2, 0)
-    assert res.dtype == np.dtype(result_t)
+    expected_dtype = np.dtype(result_t)
+    for kwargs in ({}, {"rtol": None}):
+        res = np.linalg.pinv(a, **kwargs)
+        assert res.shape == (2, 0)
+        assert res.dtype == expected_dtype
 
 
 class DetCases(LinalgSquareTestCase, LinalgGeneralizedSquareTestCase):
