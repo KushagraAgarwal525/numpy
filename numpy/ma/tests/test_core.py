@@ -3927,6 +3927,27 @@ class TestMaskedArrayMethods:
         assert_equal(take(x, [0, 2], axis=1),
                      array([[10, 30], [40, 60]], mask=[[0, 1], [1, 0]]))
 
+    def test_take_string(self):
+        # gh-9206: string scalars do not support [...], which take used to
+        # promote ndarray.take results before viewing as MaskedArray.
+        x = masked_array(['hello', 'world'], mask=[0, 1])
+        assert_equal(x.take(0), 'hello')
+        assert_(x.take(1) is np.ma.masked)
+        assert_equal(x.take([0, 1]), x)
+        assert_equal(take(x, 0), 'hello')
+
+        x = masked_array([b'hello', b'world'], mask=[0, 1])
+        assert_equal(x.take(0), b'hello')
+        assert_(x.take(1) is np.ma.masked)
+        assert_equal(x.take([0, 1]), x)
+
+    def test_take_object(self):
+        # Object scalars also lack [...]; take must still return masked scalars.
+        x = masked_array([None, np.array([1, 2])], mask=[0, 1])
+        assert_equal(x.take(0), x[0])
+        assert_(x.take(1) is np.ma.masked)
+        assert_equal(x.take([0, 1]), x)
+
     def test_take_masked_indices(self):
         # Test take w/ masked indices
         a = np.array((40, 18, 37, 9, 22))

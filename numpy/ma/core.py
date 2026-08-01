@@ -6274,9 +6274,16 @@ class MaskedArray(ndarray):
         if maskindices is not nomask:
             indices = indices.filled(0)
         # Get the data, promoting scalars to 0d arrays with [...] so that
-        # .view works correctly
+        # .view works correctly.  np.str_/np.bytes_/object scalars (and other
+        # types that do not support [...]) must be wrapped first; otherwise
+        # take() raises TypeError for otherwise-valid scalar indexing.
         if out is None:
-            out = _data.take(indices, axis=axis, mode=mode)[...].view(cls)
+            taken = _data.take(indices, axis=axis, mode=mode)
+            if not isinstance(taken, ndarray):
+                tmp = np.empty((), dtype=_data.dtype)
+                tmp[()] = taken
+                taken = tmp
+            out = taken[...].view(cls)
         else:
             np.take(_data, indices, axis=axis, mode=mode, out=out)
         # Get the mask
