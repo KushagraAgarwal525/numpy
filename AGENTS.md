@@ -4,28 +4,34 @@
 
 This fork is configured for Cursor Cloud Agents via `.cursor/environment.json`.
 
-### Staying current with upstream
-- Fork `main` is synced from `numpy/numpy` daily by `.github/workflows/sync-upstream.yml` (also runnable via Actions → Sync upstream main → Run workflow).
-- Every Cloud Agent boot also merges `upstream/main` in `.cursor/install.sh` before `spin build`, so the build matches the latest upstream tip even if the daily sync has not run yet.
-- Fork-only files (`.cursor/`, `AGENTS.md`) are kept across merges.
+### Staying current with upstream (SHA-gated)
+- On every boot, `.cursor/install.sh` fetches `upstream/main` (`numpy/numpy`).
+- If the working tree is behind, it merges `upstream/main` (keeps fork-only `.cursor/` + `AGENTS.md`).
+- It rebuilds with `spin build` only when:
+  - upstream was just merged, or
+  - `.cursor/build-state.json` `upstream_sha` != current `upstream/main`, or
+  - the smoke check fails.
+- Otherwise it reuses the cached build and continues.
+- After a successful build it writes `.cursor/build-state.json`.
+- If the build/smoke check fails, **stop** — do not work on issues that run.
 
-### Environment
-- Base image installs compilers, `gfortran`, OpenBLAS, Python 3, and ccache.
-- `install` syncs upstream, creates `.venv`, installs build/test/lint requirements, runs `spin build`, and verifies `import numpy`.
-- Always activate the venv before commands: `source .venv/bin/activate` (from repo root).
+### Smoke / import rules
+- Always activate: `source .venv/bin/activate`
+- Use `spin python`, `spin test`, `spin build` — never bare `python -c "import numpy"` or `pytest` from the repo root (imports the source tree and breaks).
 
 ### Build / test
-- Rebuild after C/Cython changes: `spin build`
-- Full suite (slow): `spin test -v`
-- Preferred for issue fixes — narrowest relevant tests, e.g.:
+- Rebuild after C/Cython edits: `spin build`
+- Narrow tests preferred:
   - `spin test -v -t numpy/_core/tests/test_multiarray.py`
   - `spin test -v -t path/to/test_file.py::test_name`
-- Lint touched Python: `spin lint`
-- Do **not** run `pytest` from repo root without `spin` (strange import errors).
+- Lint: `spin lint`
 
-### Contribution rules for this fork automation
-- Work one upstream `numpy/numpy` issue at a time.
-- Branch from up-to-date `main` after install sync has completed.
+### Issue tracking
+- Read/update `.cursor/issue-state.json` (`completed` / `attempted` / `skipped`) so later runs do not repeat work.
+
+### Contribution rules
+- One upstream `numpy/numpy` issue per run.
+- Branch from up-to-date `main` after install finishes.
 - Minimal diffs; match local style; no drive-by refactors.
-- Open **draft PRs only** against this fork's `main` (never against upstream).
+- **Draft PRs only** against this fork's `main` (never against upstream).
 - No PR unless verification for the changed area passed.
