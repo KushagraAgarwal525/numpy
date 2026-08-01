@@ -185,6 +185,30 @@ class TestBuiltin:
         assert_raises(TypeError, np.dtype, b'\xff')
         assert_raises(TypeError, np.dtype, b's\xff')
 
+    @pytest.mark.parametrize(
+        "spec, expected",
+        [
+            ("Zf", np.dtype(np.complex64)),
+            ("Zd", np.dtype(np.complex128)),
+            ("Zg", np.dtype(np.clongdouble)),
+            ("=Zf", np.dtype(np.complex64)),
+            ("=Zd", np.dtype(np.complex128)),
+            ("<Zd", np.dtype("<c16")),
+            (">Zd", np.dtype(">c16")),
+            ("|Zf", np.dtype(np.complex64)),
+        ],
+    )
+    def test_pep3118_complex_dtype_strings(self, spec, expected):
+        # gh-28360: dtype must accept PEP 3118 complex format codes that the
+        # buffer protocol already emits (and that ctypes uses on Python 3.15+).
+        assert_dtype_equal(np.dtype(spec), expected)
+        assert_dtype_equal(np.dtype(spec.encode("ascii")), expected)
+
+    @pytest.mark.parametrize("spec", ["Zz", "Za", "Z", "ZZ"])
+    def test_pep3118_complex_dtype_strings_invalid(self, spec):
+        with pytest.raises(TypeError, match="not understood"):
+            np.dtype(spec)
+
     def test_bad_param(self):
         # Can't give a size that's too small
         assert_raises(ValueError, np.dtype,
