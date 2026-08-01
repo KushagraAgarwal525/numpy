@@ -299,6 +299,8 @@ class TestDateTime:
 
         # Construction from integers requires a specified unit
         assert_raises(ValueError, np.datetime64, 17)
+        assert_raises(ValueError, np.datetime64, np.int64(17))
+        assert_raises(ValueError, np.datetime64, np.array(17))
 
         # When constructing from a scalar or zero-dimensional array,
         # it either keeps the units or you can override them.
@@ -413,6 +415,47 @@ class TestDateTime:
                 match=self.generic_unit_deprecation_message
             ):
                 assert_equal(np.timedelta64(np.int64(123)), np.timedelta64(123))
+
+    @pytest.mark.parametrize("unit", [
+        "Y", "M", "W", "D", "h", "m",
+        "s", "ms", "us", "ns", "ps", "fs", "as",
+    ])
+    @pytest.mark.parametrize("int_type", [
+        np.int8, np.int16, np.int32, np.int64, np.intp,
+        np.uint8, np.uint16, np.uint32, np.uint64, np.uintp,
+    ])
+    def test_datetime_np_int_construction(self, unit, int_type):
+        # regression test for gh-10004
+        actual = np.datetime64(int_type(123), unit)
+        expected = np.datetime64(123, unit)
+        assert_equal(actual, expected)
+        assert_equal(actual.dtype, expected.dtype)
+
+    @pytest.mark.parametrize("value", [np.int64(123), np.uint64(123)])
+    def test_datetime_np_int_construction_requires_unit(self, value):
+        with pytest.raises(ValueError, match="requires a specified unit"):
+            np.datetime64(value)
+        with pytest.raises(ValueError, match="requires a specified unit"):
+            np.datetime64(value, "generic")
+
+    def test_datetime_np_uint_construction_overflow(self):
+        with pytest.raises(OverflowError):
+            np.datetime64(np.uint64(2**63), "s")
+
+    @pytest.mark.parametrize("unit", [
+        "Y", "M", "W", "D", "h", "m",
+        "s", "ms", "us", "ns", "ps", "fs", "as",
+    ])
+    @pytest.mark.parametrize("int_type", [
+        np.int8, np.int16, np.int32, np.int64, np.intp,
+        np.uint8, np.uint16, np.uint32, np.uint64, np.uintp,
+    ])
+    def test_datetime_0d_int_array_construction(self, unit, int_type):
+        # 0-D integer arrays should be accepted like integer scalars
+        actual = np.datetime64(np.array(123, dtype=int_type), unit)
+        expected = np.datetime64(123, unit)
+        assert_equal(actual, expected)
+        assert_equal(actual.dtype, expected.dtype)
 
     def test_timedelta_scalar_construction(self):
         # Construct with different units

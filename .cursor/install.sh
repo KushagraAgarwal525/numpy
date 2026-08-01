@@ -53,7 +53,7 @@ PY
 
 smoke_numpy() {
   # Never plain `import numpy` from repo root — that loads the source tree, not the build.
-  spin python -c "import numpy as np; print('numpy_ok', np.__version__, np.__file__)"
+  spin python -- -c "import numpy as np; print('numpy_ok', np.__version__, np.__file__)"
 }
 
 ensure_venv_and_deps() {
