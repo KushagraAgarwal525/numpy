@@ -266,7 +266,7 @@ def scaninputline(inputline):
             emptygen = False
         elif l[0] == '-':
             errmess(f'Unknown option {repr(l)}\n')
-            sys.exit()
+            sys.exit(1)
         elif f2:
             f2 = 0
             signsfile = l
@@ -308,7 +308,7 @@ def scaninputline(inputline):
     if signsfile and os.path.isfile(signsfile) and 'h-overwrite' not in options:
         errmess(
             f'Signature file "{signsfile}" exists!!! Use --overwrite-signature to overwrite.\n')
-        sys.exit()
+        sys.exit(1)
 
     options['emptygen'] = emptygen
     options['debug'] = debug
