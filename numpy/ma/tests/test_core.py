@@ -3943,7 +3943,7 @@ class TestMaskedArrayMethods:
 
     def test_take_object(self):
         # Object scalars also lack [...]; take must still return masked scalars.
-        x = masked_array([None, np.array([1, 2])], mask=[0, 1])
+        x = masked_array([None, np.array([1, 2])], mask=[0, 1], dtype=object)
         assert_equal(x.take(0), x[0])
         assert_(x.take(1) is np.ma.masked)
         assert_equal(x.take([0, 1]), x)
