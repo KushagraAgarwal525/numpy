@@ -1960,6 +1960,44 @@ class TestVectorize:
         assert_equal(r.dtype, np.dtype('float64'))
         assert_array_equal(r, [1, 2, 3])
 
+    def test_signature_string_otypes(self):
+        # gh-23442: signature path must not truncate string otypes to U1/S1
+        def make_10char_str(n):
+            return f"{n:<10d}"
+
+        f = vectorize(make_10char_str, signature='()->()', otypes=['<U10'])
+        out = f([1, 24, 365, 4096])
+        assert_equal(out.dtype, np.dtype('<U10'))
+        assert_array_equal(
+            out, np.array(['1         ', '24        ', '365       ', '4096      '])
+        )
+
+        f = vectorize(str, signature='()->()', otypes=['U32'])
+        out = f([[123, 99999], [-1, 0]])
+        assert_equal(out.dtype.char, 'U')
+        assert out.dtype.itemsize // out.dtype.alignment >= 5 or out.dtype.itemsize >= 20
+        assert_array_equal(
+            out, np.array([['123', '99999'], ['-1', '0']], dtype=out.dtype)
+        )
+
+        f = vectorize(lambda n: f"{n:<8d}".encode('ascii'),
+                      signature='()->()', otypes=['S8'])
+        out = f([1, 24])
+        assert_equal(out.dtype.char, 'S')
+        assert_array_equal(out, np.array([b'1       ', b'24      ']))
+
+    def test_signature_string_without_otypes(self):
+        # signature path should size strings from all results, not the first
+        f = vectorize(str, signature='()->()')
+        out = f([1, 99999])
+        assert_array_equal(out, np.array(['1', '99999']))
+        assert_equal(out.dtype, np.dtype('<U5'))
+        out = f([[123, 99999], [-1, 0]])
+        assert_array_equal(
+            out, np.array([['123', '99999'], ['-1', '0']])
+        )
+        assert_equal(out.dtype, np.dtype('<U5'))
+
     def test_signature_invalid_inputs(self):
         f = vectorize(operator.add, signature='(n),(n)->(n)')
         with assert_raises_regex(TypeError, 'wrong number of positional'):
