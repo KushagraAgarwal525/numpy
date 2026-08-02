@@ -1208,17 +1208,38 @@ class _DomainedBinaryOperation(_MaskedUFunc):
         "Execute the call behavior."
         # Get the data
         (da, db) = (getdata(a), getdata(b))
+        # Apply the domain before calling the ufunc.  For floating dtypes
+        # IEEE arithmetic yields inf/nan that we can detect with isfinite,
+        # but object (and similar) dtypes raise instead (e.g. ZeroDivisionError),
+        # so replace out-of-domain inputs first — same idea as __itruediv__.
+        domain = ufunc_domain.get(self.f, None)
+        domain_mask = nomask
+        if domain is not None:
+            try:
+                domain_mask = domain(da, db)
+            except Exception:
+                domain_mask = nomask
+            if (domain_mask is not nomask and np.any(domain_mask)
+                    and self.f in ufunc_fills):
+                try:
+                    filly = ufunc_fills[self.f][1]
+                    db = np.where(
+                        domain_mask, np.asanyarray(db).dtype.type(filly), db)
+                except Exception:
+                    pass
         # Get the result
         with np.errstate(divide='ignore', invalid='ignore'):
             result = self.f(da, db, *args, **kwargs)
         # Get the mask as a combination of the source masks and invalid
-        m = ~umath.isfinite(result)
+        try:
+            m = ~umath.isfinite(result)
+        except TypeError:
+            # Object and other dtypes without isfinite support (gh-2814)
+            m = np.zeros(np.shape(result), dtype=bool)
         m |= getmask(a)
         m |= getmask(b)
-        # Apply the domain
-        domain = ufunc_domain.get(self.f, None)
-        if domain is not None:
-            m |= domain(da, db)
+        if domain_mask is not nomask:
+            m |= domain_mask
         # Take care of the scalar case first
         if not m.ndim:
             if m:
