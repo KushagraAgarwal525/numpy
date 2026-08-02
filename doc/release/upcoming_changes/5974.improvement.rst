@@ -1,0 +1,6 @@
+``ma`` fill values accept ``dtype='c'`` with ``str``
+---------------------------------------------------
+Setting a string fill value on a `numpy.ma.MaskedArray` with
+``dtype='c'`` (character / ``|S1``) no longer raises ``TypeError``.
+The check now uses the dtype kind, so ``dtype('c')`` is treated like
+``dtype('S1')``.
