@@ -3535,6 +3535,8 @@ class MaskedArray(ndarray):
         Set the mask.
 
         """
+        if not self.flags.writeable:
+            raise ValueError("assignment destination is read-only")
         idtype = self.dtype
         current_mask = self._mask
         if mask is masked:
@@ -3674,6 +3676,37 @@ class MaskedArray(ndarray):
         """
         self._hardmask = False
         return self
+
+    def setflags(self, write=None, align=None, uic=None):
+        """
+        Set array flags WRITEABLE, ALIGNED, WRITEBACKIFCOPY, respectively.
+
+        Parameters
+        ----------
+        write : bool, optional
+            Describes whether or not `a` can be written to.
+        align : bool, optional
+            Describes whether or not `a` is aligned properly for its type.
+        uic : bool, optional
+            Describes whether or not `a` is a copy of another "base" array.
+
+        Notes
+        -----
+        Unlike `ndarray.setflags`, when `write` is given this also updates the
+        writeable flag on the mask (when the mask is an array). Making the
+        array non-writeable first unshares a shared mask so other arrays are
+        not affected (see `unshare_mask`).
+
+        See Also
+        --------
+        numpy.ndarray.setflags
+
+        """
+        ndarray.setflags(self, write=write, align=align, uic=uic)
+        if write is not None and self._mask is not nomask:
+            if not write:
+                self.unshare_mask()
+            self._mask.setflags(write=write)
 
     @property
     def hardmask(self):
