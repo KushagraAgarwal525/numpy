@@ -1974,10 +1974,11 @@ class TestVectorize:
 
         f = vectorize(str, signature='()->()', otypes=['U32'])
         out = f([[123, 99999], [-1, 0]])
-        assert_equal(out.dtype.char, 'U')
-        assert out.dtype.itemsize // out.dtype.alignment >= 5 or out.dtype.itemsize >= 20
+        # String sizes in otypes are treated as typecodes; width follows content
+        # (same as the non-signature path; see gh-26269 / gh-23442).
+        assert_equal(out.dtype, np.dtype('<U5'))
         assert_array_equal(
-            out, np.array([['123', '99999'], ['-1', '0']], dtype=out.dtype)
+            out, np.array([['123', '99999'], ['-1', '0']])
         )
 
         f = vectorize(lambda n: f"{n:<8d}".encode('ascii'),
