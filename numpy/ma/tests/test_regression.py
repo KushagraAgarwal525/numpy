@@ -1,5 +1,5 @@
 import numpy as np
-from numpy.testing import assert_, assert_array_equal
+from numpy.testing import assert_, assert_array_equal, assert_raises
 
 
 class TestRegression:
@@ -81,3 +81,45 @@ class TestRegression:
         np.ma.array((1, (b"", b"")),
                     dtype=[("x", np.int_),
                           ("y", [("i", np.void), ("j", np.void)])])
+
+    def test_setflags_write_locks_mask(self):
+        # gh-16976: setflags(write=False) should make the mask read-only too
+        a = np.ma.MaskedArray([0, 1, 2], mask=[True, True, False],
+                              hard_mask=True)
+        a.setflags(write=False)
+        assert_(not a.flags.writeable)
+        assert_(not a.mask.flags.writeable)
+        assert_(not a.data.flags.writeable)
+        with assert_raises(ValueError):
+            a[0] = 666
+        with assert_raises(ValueError):
+            a.data[0] = 666
+        with assert_raises(ValueError):
+            a.mask[0] = False
+        with assert_raises(ValueError):
+            a.mask = [False, False, False]
+
+        # Re-enabling writes unlocks the mask as well
+        a.setflags(write=True)
+        assert_(a.flags.writeable)
+        assert_(a.mask.flags.writeable)
+        a.mask[0] = False
+        assert_(not a.mask[0])
+
+        # Locking must not affect a shared original mask array
+        shared = np.array([True, False, True])
+        b = np.ma.MaskedArray([1, 2, 3], mask=shared)
+        assert_(b.sharedmask)
+        b.setflags(write=False)
+        assert_(not b.sharedmask)
+        assert_(shared.flags.writeable)
+        shared[0] = False
+        assert_(not shared[0])
+        with assert_raises(ValueError):
+            b.mask[1] = True
+
+        # flags.writeable assignment goes through setflags
+        c = np.ma.MaskedArray([0, 1], mask=[False, True])
+        c.flags.writeable = False
+        with assert_raises(ValueError):
+            c.mask[0] = True
