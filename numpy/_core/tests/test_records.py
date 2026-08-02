@@ -89,6 +89,28 @@ class TestFromrecords:
         x1[1] = 34
         assert_equal(r.a, np.array([1, 2, 3, 4]))
 
+    def test_fromarrays_formats_tuple(self):
+        # Regression test for gh-1737 / Trac #1139: formats must accept tuples
+        # the same way names already does.
+        s = ['a', 'b', 'c']
+        i = [1, 2, 3]
+        f = [.1, .2, .3]
+        expected = np.rec.fromarrays(
+            [s, i, f], names=['strings', 'ints', 'floats'],
+            formats=['U1', 'i4', 'f8']
+        )
+        rec = np.rec.fromarrays(
+            [s, i, f], names=('strings', 'ints', 'floats'),
+            formats=('U1', 'i4', 'f8')
+        )
+        assert_array_equal(rec, expected)
+        assert_equal(rec.dtype, expected.dtype)
+
+        parsed = np.rec.format_parser(('f8', 'i4', 'S5'), None, None)
+        assert_equal(
+            parsed.dtype, np.dtype([('f0', 'f8'), ('f1', 'i4'), ('f2', 'S5')])
+        )
+
     def test_recarray_fromfile(self):
         data_dir = path.join(path.dirname(__file__), 'data')
         filename = path.join(data_dir, 'recarray_from_file.fits')

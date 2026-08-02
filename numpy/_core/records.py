@@ -69,10 +69,10 @@ class format_parser:
 
     Parameters
     ----------
-    formats : str or list of str
+    formats : str or list/tuple of str
         The format description, either specified as a string with
         comma-separated format descriptions in the form ``'f8, i4, S5'``, or
-        a list of format description strings  in the form
+        a list or tuple of format description strings in the form
         ``['f8', 'i4', 'S5']``.
     names : str or list/tuple of str
         The field names, either specified as a comma-separated string in the
@@ -124,7 +124,7 @@ class format_parser:
 
         if formats is None:
             raise ValueError("Need formats argument")
-        if isinstance(formats, list):
+        if isinstance(formats, (list, tuple)):
             dtype = sb.dtype(
                 [
                     (f'f{i}', format_)
@@ -293,11 +293,9 @@ class recarray(ndarray):
     dtype : data-type, optional
         The desired data-type.  By default, the data-type is determined
         from `formats`, `names`, `titles`, `aligned` and `byteorder`.
-    formats : list of data-types, optional
-        A list containing the data-types for the different columns, e.g.
-        ``['i4', 'f8', 'i4']``.  `formats` does *not* support the new
-        convention of using types directly, i.e. ``(int, float, int)``.
-        Note that `formats` must be a list, not a tuple.
+    formats : list or tuple of data-types, optional
+        A list or tuple containing the data-types for the different columns,
+        e.g. ``['i4', 'f8', 'i4']`` or ``('i4', 'f8', 'i4')``.
         Given that `formats` is somewhat limited, we recommend specifying
         `dtype` instead.
     names : tuple of str, optional
