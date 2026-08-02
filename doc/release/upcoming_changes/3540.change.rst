@@ -1,0 +1,6 @@
+``ndarray.round`` preserves subclasses
+--------------------------------------
+Rounding an ndarray subclass (for example via ``arr.round()`` or
+``np.round(arr)``) now returns an instance of the same subclass for all
+``decimals`` values. Previously some code paths allocated a base
+``ndarray`` via ``PyArray_Empty`` and dropped the subclass (gh-3540).
