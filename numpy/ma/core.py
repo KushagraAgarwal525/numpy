@@ -983,6 +983,9 @@ class _MaskedUnaryOperation(_MaskedUFunc):
 
         """
         d = getdata(a)
+        out = kwargs.get('out')
+        # Preserve input values when ``out`` may overwrite ``d`` (gh-4065).
+        d_orig = np.array(d, copy=True) if out is not None else d
         # Deal with domain
         if self.domain is not None:
             # Case 1.1. : Domained function
@@ -995,8 +998,9 @@ class _MaskedUnaryOperation(_MaskedUFunc):
             with np.errstate(divide='ignore', invalid='ignore'):
                 domain_mask = self.domain(d)
                 result = self.f(d, *args, **kwargs)
-            # Make a mask
-            m = ~umath.isfinite(result)
+            # Make a mask (use ndarray data; result may be a MaskedArray when
+            # ``out`` was passed through to the ufunc).
+            m = ~umath.isfinite(getdata(result))
             m |= domain_mask
             m |= getmask(a)
         else:
@@ -1006,7 +1010,7 @@ class _MaskedUnaryOperation(_MaskedUFunc):
                 result = self.f(d, *args, **kwargs)
             m = getmask(a)
 
-        if not result.ndim:
+        if not getattr(result, 'ndim', 0):
             # Case 2.1. : The result is scalarscalar
             if m:
                 return masked
@@ -1021,11 +1025,18 @@ class _MaskedUnaryOperation(_MaskedUFunc):
             # In case result has a lower dtype than the inputs (as in
             # equal)
             try:
-                np.copyto(result, d, where=m)
+                np.copyto(result, d_orig, where=m)
             except TypeError:
                 pass
+
+        # Honour ``out=`` when it is a MaskedArray (ufunc already wrote data).
+        if isinstance(out, MaskedArray):
+            out._mask = m
+            out._sharedmask = False
+            return out
+
         # Transform to
-        masked_result = result.view(get_masked_subclass(a))
+        masked_result = getdata(result).view(get_masked_subclass(a))
         masked_result._mask = m
         masked_result._update_from(a)
         return masked_result
@@ -1213,6 +1224,9 @@ class _DomainedBinaryOperation(_MaskedUFunc):
         "Execute the call behavior."
         # Get the data
         (da, db) = (getdata(a), getdata(b))
+        out = kwargs.get('out')
+        # Preserve first input when ``out`` may overwrite it (gh-4065).
+        da_orig = np.array(da, copy=True) if out is not None else da
         # Apply the domain before the ufunc so ``out`` aliasing an input
         # cannot corrupt the domain check (same issue as gh-4065).
         domain = ufunc_domain.get(self.f, None)
@@ -1221,12 +1235,12 @@ class _DomainedBinaryOperation(_MaskedUFunc):
         with np.errstate(divide='ignore', invalid='ignore'):
             result = self.f(da, db, *args, **kwargs)
         # Get the mask as a combination of the source masks and invalid
-        m = ~umath.isfinite(result)
+        m = ~umath.isfinite(getdata(result))
         m |= getmask(a)
         m |= getmask(b)
         m |= domain_mask
         # Take care of the scalar case first
-        if not m.ndim:
+        if not getattr(result, 'ndim', 0):
             if m:
                 return masked
             else:
@@ -1236,15 +1250,20 @@ class _DomainedBinaryOperation(_MaskedUFunc):
         try:
             np.copyto(result, 0, casting='unsafe', where=m)
             # avoid using "*" since this may be overlaid
-            masked_da = umath.multiply(m, da)
+            masked_da = umath.multiply(m, da_orig)
             # only add back if it can be cast safely
-            if np.can_cast(masked_da.dtype, result.dtype, casting='safe'):
+            if np.can_cast(masked_da.dtype, getdata(result).dtype, casting='safe'):
                 result += masked_da
         except Exception:
             pass
 
+        if isinstance(out, MaskedArray):
+            out._mask = m
+            out._sharedmask = False
+            return out
+
         # Transforms to a (subclass of) MaskedArray
-        masked_result = result.view(get_masked_subclass(a, b))
+        masked_result = getdata(result).view(get_masked_subclass(a, b))
         masked_result._mask = m
         if isinstance(a, MaskedArray):
             masked_result._update_from(a)
