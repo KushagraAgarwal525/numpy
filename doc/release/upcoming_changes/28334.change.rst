@@ -1,0 +1,7 @@
+``open_memmap`` accepts NumPy integers in ``shape``
+---------------------------------------------------
+Passing NumPy integer scalars (e.g. ``np.int64``) in the ``shape`` argument
+to `numpy.lib.format.open_memmap` no longer writes a header that
+`numpy.load` cannot parse. Shape entries are converted with
+``operator.index`` so the ``.npy`` header contains plain Python ``int``
+values.

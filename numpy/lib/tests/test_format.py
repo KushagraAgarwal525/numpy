@@ -730,6 +730,32 @@ def test_version_2_0_memmap(tmpdir):
 
     assert_array_equal(ma, d)
 
+
+@pytest.mark.skipif(IS_WASM, reason="memmap doesn't work correctly")
+def test_open_memmap_numpy_int_shape(tmpdir):
+    # gh-28334: NumPy integer shape entries must serialize as plain ints so
+    # the .npy header remains loadable via ast.literal_eval.
+    path = os.path.join(tmpdir, 'np_int_shape.npy')
+    shape = (np.int64(2), np.int64(3), np.int64(4))
+    ma = format.open_memmap(path, mode='w+', dtype=np.uint8, shape=shape)
+    ma[...] = 1
+    ma.flush()
+    del ma
+
+    loaded = np.load(path)
+    assert_equal_(loaded.shape, (2, 3, 4))
+    assert_array_equal(loaded, np.ones((2, 3, 4), dtype=np.uint8))
+
+    with open(path, 'rb') as fp:
+        version = format.read_magic(fp)
+        assert_equal_(version, (1, 0))
+        shape_hdr, fortran_order, dtype = format.read_array_header_1_0(fp)
+    assert_equal_(shape_hdr, (2, 3, 4))
+    assert_(all(type(x) is int for x in shape_hdr))
+    assert_(fortran_order is False)
+    assert_equal_(dtype, np.dtype(np.uint8))
+
+
 @pytest.mark.parametrize("mmap_mode", ["r", None])
 def test_huge_header(tmpdir, mmap_mode):
     f = os.path.join(tmpdir, 'large_header.npy')
