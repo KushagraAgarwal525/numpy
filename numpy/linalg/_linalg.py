@@ -2103,7 +2103,15 @@ def matrix_rank(A, tol=None, hermitian=False, *, rtol=None):
 
     A = asarray(A)
     if A.ndim < 2:
-        return int(not all(A == 0))
+        # Without an explicit tolerance, keep the historical vector/scalar
+        # rule: rank is 1 unless every element is zero.  When tol/rtol is
+        # given, treat the input as a row matrix so the threshold matches
+        # an explicit 2-D row (gh-7906).
+        if tol is None and rtol is None:
+            return int(not all(A == 0))
+        A = A.reshape(1, -1)
+        if hermitian and A.shape[-1] != A.shape[-2]:
+            hermitian = False
 
     S = svd(A, compute_uv=False, hermitian=hermitian)
 
