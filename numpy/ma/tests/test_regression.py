@@ -50,6 +50,17 @@ class TestRegression:
         a.fill_value = 'X'
         assert_(a.fill_value == 'X')
 
+    def test_set_fill_value_dtype_c(self):
+        # gh-5974: dtype('c') equals dtype('S1') but uses char 'c'.
+        # Setting a str fill value must work the same as for 'S1'.
+        a = np.ma.zeros((2,), dtype='c')
+        a.set_fill_value('N')
+        assert_(a.fill_value == b'N')
+        b = np.ma.zeros((2,), dtype='S1')
+        b.set_fill_value('N')
+        assert_(b.fill_value == b'N')
+        assert_(a.fill_value == b.fill_value)
+
     def test_var_sets_maskedarray_scalar(self):
         # Issue gh-2757
         a = np.ma.array(np.arange(5), mask=True)

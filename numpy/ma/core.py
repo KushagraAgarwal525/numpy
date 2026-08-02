@@ -499,7 +499,10 @@ def _check_fill_value(fill_value, ndtype):
             fill_value = np.asarray(fill_value, dtype=object)
             fill_value = np.array(_recursive_set_fill_value(fill_value, ndtype),
                                   dtype=ndtype)
-    elif isinstance(fill_value, str) and (ndtype.char not in 'OSTVU'):
+    elif isinstance(fill_value, str) and (ndtype.kind not in 'OSTVU'):
+        # Use kind rather than char: dtype('c') equals dtype('S1') but has
+        # char 'c', so a char-based check incorrectly rejected str fill
+        # values for the character typecode (gh-5974).
         # Note this check doesn't work if fill_value is not a scalar
         err_msg = "Cannot set fill value of string with array of dtype %s"
         raise TypeError(err_msg % ndtype)
