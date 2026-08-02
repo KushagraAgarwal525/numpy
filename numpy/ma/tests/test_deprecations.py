@@ -9,7 +9,7 @@ from numpy.ma.testutils import assert_equal
 
 
 class TestArgsort:
-    """ gh-8701 """
+    """ gh-8701: default axis is -1, matching ndarray.argsort """
     def _test_base(self, argsort, cls):
         arr_0d = np.array(1).view(cls)
         argsort(arr_0d)
@@ -17,15 +17,15 @@ class TestArgsort:
         arr_1d = np.array([1, 2, 3]).view(cls)
         argsort(arr_1d)
 
-        # argsort has a bad default for >1d arrays
+        # Default axis is -1 (same as np.argsort); flattening requires axis=None
         arr_2d = np.array([[1, 2], [3, 4]]).view(cls)
-        result = pytest.warns(
-            np.ma.core.MaskedArrayFutureWarning, argsort, arr_2d)
-        assert_equal(result, argsort(arr_2d, axis=None))
+        result = argsort(arr_2d)
+        assert_equal(result, argsort(arr_2d, axis=-1))
+        assert_equal(result.shape, arr_2d.shape)
 
-        # should be no warnings for explicitly specifying it
-        argsort(arr_2d, axis=None)
-        argsort(arr_2d, axis=-1)
+        # Explicit None still flattens
+        flat = argsort(arr_2d, axis=None)
+        assert_equal(flat.shape, (arr_2d.size,))
 
     def test_function_ndarray(self):
         return self._test_base(np.ma.argsort, np.ndarray)
@@ -35,6 +35,11 @@ class TestArgsort:
 
     def test_method(self):
         return self._test_base(np.ma.MaskedArray.argsort, np.ma.MaskedArray)
+
+    def test_matches_ndarray_default(self):
+        a = np.ma.array([[3, 1], [4, 2]], mask=[[0, 0], [0, 1]])
+        assert_equal(a.argsort(), np.argsort(np.asarray(a), axis=-1))
+        assert_equal(np.ma.argsort(a), np.argsort(np.asarray(a)))
 
 
 class TestMinimumMaximum:

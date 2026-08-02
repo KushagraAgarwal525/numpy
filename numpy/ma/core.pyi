@@ -2386,7 +2386,7 @@ class MaskedArray(ndarray[_ShapeT_co, _DTypeT_co]):
 
     def argsort(  # type: ignore[override]
         self,
-        axis: SupportsIndex | _NoValueType = ...,
+        axis: SupportsIndex | None = -1,
         kind: _SortKind | None = None,
         order: str | Sequence[str] | None = None,
         endwith: bool = True,
@@ -3662,16 +3662,10 @@ def take[ArrayT: np.ndarray](
 def power(a: ArrayLike, b: ArrayLike, third: None = None) -> _MaskedArray[Incomplete]: ...
 
 #
-@overload  # axis: <default> (deprecated)
-@deprecated(
-    "In the future the default for argsort will be axis=-1, not the current None, to match its documentation and np.argsort. "
-    "Explicitly pass -1 or None to silence this warning.",
-    category=MaskedArrayFutureWarning,
-    stacklevel=2,
-)
+@overload  # MaskedArray, axis: <default> / int-like
 def argsort(
-    a: ArrayLike,
-    axis: _NoValueType = ...,
+    a: MaskedArray,
+    axis: SupportsIndex = -1,
     kind: _SortKind | None = None,
     order: str | Sequence[str] | None = None,
     endwith: bool | None = True,
@@ -3679,8 +3673,8 @@ def argsort(
     *,
     stable: bool | None = None,
     descending: bool | None = None,
-) -> _Array1D[np.intp]: ...
-@overload  # MaskedArray, axis: None
+) -> _MaskedArray[np.intp]: ...
+@overload  # MaskedArray, axis: None (flatten)
 def argsort(
     a: MaskedArray,
     axis: None,
@@ -3692,10 +3686,10 @@ def argsort(
     stable: bool | None = None,
     descending: bool | None = None,
 ) -> _Masked1D[np.intp]: ...
-@overload  # MaskedArray, axis: int-like
+@overload  # array-like, axis: <default> / int-like
 def argsort(
-    a: MaskedArray,
-    axis: SupportsIndex,
+    a: ArrayLike,
+    axis: SupportsIndex = -1,
     kind: _SortKind | None = None,
     order: str | Sequence[str] | None = None,
     endwith: bool | None = True,
@@ -3703,8 +3697,8 @@ def argsort(
     *,
     stable: bool | None = None,
     descending: bool | None = None,
-) -> _MaskedArray[np.intp]: ...
-@overload  # array-like, axis: None
+) -> NDArray[np.intp]: ...
+@overload  # array-like, axis: None (flatten)
 def argsort(
     a: ArrayLike,
     axis: None,
@@ -3716,18 +3710,6 @@ def argsort(
     stable: bool | None = None,
     descending: bool | None = None,
 ) -> _Array1D[np.intp]: ...
-@overload  # array-like, axis: int-like
-def argsort(
-    a: ArrayLike,
-    axis: SupportsIndex,
-    kind: _SortKind | None = None,
-    order: str | Sequence[str] | None = None,
-    endwith: bool | None = True,
-    fill_value: _ScalarLike_co | None = None,
-    *,
-    stable: bool | None = None,
-    descending: bool | None = None,
-) -> NDArray[np.intp]: ...
 
 #
 @overload

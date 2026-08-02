@@ -90,33 +90,6 @@ nomask = MaskType(0)
 class MaskedArrayFutureWarning(FutureWarning):
     pass
 
-def _deprecate_argsort_axis(arr):
-    """
-    Adjust the axis passed to argsort, warning if necessary
-
-    Parameters
-    ----------
-    arr
-        The array which argsort was called on
-
-    np.ma.argsort has a long-term bug where the default of the axis argument
-    is wrong (gh-8701), which now must be kept for backwards compatibility.
-    Thankfully, this only makes a difference when arrays are 2- or more-
-    dimensional, so we only need a warning then.
-    """
-    if arr.ndim <= 1:
-        # no warning needed - but switch to -1 anyway, to avoid surprising
-        # subclasses, which are more likely to implement scalar axes.
-        return -1
-    else:
-        # 2017-04-11, Numpy 1.13.0, gh-8701: warn on axis default
-        warnings.warn(
-            "In the future the default for argsort will be axis=-1, not the "
-            "current None, to match its documentation and np.argsort. "
-            "Explicitly pass -1 or None to silence this warning.",
-            MaskedArrayFutureWarning, stacklevel=3)
-        return None
-
 
 def doc_note(initialdoc, note):
     """
@@ -5626,7 +5599,7 @@ class MaskedArray(ndarray):
             out.__setmask__(self._mask)
         return out
 
-    def argsort(self, axis=np._NoValue, kind=None, order=None, endwith=True,
+    def argsort(self, axis=-1, kind=None, order=None, endwith=True,
                 fill_value=None, *, stable=False, descending=False):
         """
         Return an ndarray of indices that sort the array along the
@@ -5635,9 +5608,9 @@ class MaskedArray(ndarray):
 
         Parameters
         ----------
-        axis : int, optional
-            Axis along which to sort. If None, the default, the flattened array
-            is used.
+        axis : int or None, optional
+            Axis along which to sort. The default is -1 (the last axis).
+            If None, the flattened array is used.
         kind : {'quicksort', 'mergesort', 'heapsort', 'stable'}, optional
             The sorting algorithm used.
         order : str or list of str, optional
@@ -5695,10 +5668,6 @@ class MaskedArray(ndarray):
             raise ValueError(
                 "`descending` parameter is not supported for masked arrays."
             )
-
-        # 2017-04-11, Numpy 1.13.0, gh-8701: warn on axis default
-        if axis is np._NoValue:
-            axis = _deprecate_argsort_axis(self)
 
         if fill_value is None:
             if endwith:
@@ -7232,14 +7201,10 @@ def power(a, b, third=None):
     return result
 
 
-def argsort(a, axis=np._NoValue, kind=None, order=None, endwith=True,
+def argsort(a, axis=-1, kind=None, order=None, endwith=True,
             fill_value=None, *, stable=None, descending=None):
     "Function version of the eponymous method."
     a = np.asanyarray(a)
-
-    # 2017-04-11, Numpy 1.13.0, gh-8701: warn on axis default
-    if axis is np._NoValue:
-        axis = _deprecate_argsort_axis(a)
 
     if isinstance(a, MaskedArray):
         return a.argsort(axis=axis, kind=kind, order=order, endwith=endwith,
