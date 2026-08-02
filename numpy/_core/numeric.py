@@ -1301,33 +1301,53 @@ def roll(a, shift, axis=None):
 
     """
     a = asanyarray(a)
+    # Flatten first so a multi-valued `shift` with axis=None is handled by the
+    # same deprecation path as a scalar axis (gh-14277).
+    original_shape = None
     if axis is None:
-        return roll(a.ravel(), shift, 0).reshape(a.shape)
+        original_shape = a.shape
+        a = a.ravel()
+        axis = 0
 
-    else:
-        axis = normalize_axis_tuple(axis, a.ndim, allow_duplicate=True)
-        broadcasted = broadcast(shift, axis)
-        if broadcasted.ndim > 1:
-            raise ValueError(
-                "'shift' and 'axis' should be scalars or 1D sequences")
-        shifts = dict.fromkeys(range(a.ndim), 0)
-        for sh, ax in broadcasted:
-            shifts[ax] += int(sh)
+    axis = normalize_axis_tuple(axis, a.ndim, allow_duplicate=True)
+    shift_arr = np.asanyarray(shift)
+    # Docstring requires a matching axis sequence when shift is a sequence.
+    # Broadcasting a multi-valued shift onto a single axis (including the
+    # flattened axis=None case) sums the shifts and is almost never intended.
+    if shift_arr.ndim == 1 and shift_arr.size > 1 and len(axis) == 1:
+        warnings.warn(
+            "Passing a sequence for 'shift' when 'axis' is None or a single "
+            "axis is deprecated. This currently broadcasts all shifts onto "
+            "that axis (effectively summing them). Pass a matching 'axis' "
+            "sequence of the same length instead. This will raise an error "
+            "in the future.",
+            np.exceptions.VisibleDeprecationWarning,
+            stacklevel=2)
 
-        rolls = [((slice(None), slice(None)),)] * a.ndim
-        for ax, offset in shifts.items():
-            offset %= a.shape[ax] or 1  # If `a` is empty, nothing matters.
-            if offset:
-                # (original, result), (original, result)
-                rolls[ax] = ((slice(None, -offset), slice(offset, None)),
-                             (slice(-offset, None), slice(None, offset)))
+    broadcasted = broadcast(shift, axis)
+    if broadcasted.ndim > 1:
+        raise ValueError(
+            "'shift' and 'axis' should be scalars or 1D sequences")
+    shifts = dict.fromkeys(range(a.ndim), 0)
+    for sh, ax in broadcasted:
+        shifts[ax] += int(sh)
 
-        result = empty_like(a)
-        for indices in itertools.product(*rolls):
-            arr_index, res_index = zip(*indices)
-            result[res_index] = a[arr_index]
+    rolls = [((slice(None), slice(None)),)] * a.ndim
+    for ax, offset in shifts.items():
+        offset %= a.shape[ax] or 1  # If `a` is empty, nothing matters.
+        if offset:
+            # (original, result), (original, result)
+            rolls[ax] = ((slice(None, -offset), slice(offset, None)),
+                         (slice(-offset, None), slice(None, offset)))
 
-        return result
+    result = empty_like(a)
+    for indices in itertools.product(*rolls):
+        arr_index, res_index = zip(*indices)
+        result[res_index] = a[arr_index]
+
+    if original_shape is not None:
+        return result.reshape(original_shape)
+    return result
 
 
 def _rollaxis_dispatcher(a, axis, start=None):

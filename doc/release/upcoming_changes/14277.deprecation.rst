@@ -1,0 +1,9 @@
+``np.roll`` with a shift sequence and a single axis
+---------------------------------------------------
+
+Passing a sequence for ``shift`` when ``axis`` is ``None`` or a single
+axis is deprecated. This previously broadcast all shifts onto that one
+axis (effectively summing them), which contradicted the documented
+requirement that a tuple ``shift`` must be paired with an ``axis``
+tuple of the same length. Pass a matching ``axis`` sequence instead.
+This will become an error in the future.
