@@ -2766,8 +2766,9 @@ class TestFmax(_FilterInvalids):
         nan = float('nan')
         arg1 = np.array([0, nan, nan], dtype=object)
         arg2 = np.array([nan, 0, nan], dtype=object)
-        out = np.array([0, 0, nan], dtype=object)
-        assert_equal(np.fmax(arg1, arg2), out)
+        res = np.fmax(arg1, arg2)
+        assert_equal(res[:2], np.array([0, 0], dtype=object))
+        assert_(res[2] != res[2])  # NaN-like
         assert_equal(np.fmax.reduce(np.array([1, nan], dtype=object)), 1)
         assert_equal(np.fmax.reduce(np.array([nan, 1], dtype=object)), 1)
         assert_equal(np.fmax.reduce(np.array([1.0, nan], dtype=object)), 1.0)
@@ -2842,15 +2843,20 @@ class TestFmin(_FilterInvalids):
         nan = float('nan')
         arg1 = np.array([0, nan, nan], dtype=object)
         arg2 = np.array([nan, 0, nan], dtype=object)
-        out = np.array([0, 0, nan], dtype=object)
-        assert_equal(np.fmin(arg1, arg2), out)
+        res = np.fmin(arg1, arg2)
+        assert_equal(res[:2], np.array([0, 0], dtype=object))
+        assert_(res[2] != res[2])  # NaN-like
         assert_equal(np.fmin.reduce(np.array([1, nan], dtype=object)), 1)
         assert_equal(np.fmin.reduce(np.array([nan, 1], dtype=object)), 1)
         assert_equal(np.fmin.reduce(np.array([1.0, nan], dtype=object)), 1.0)
         # still prefer the smaller finite value
         assert_equal(np.fmin.reduce(np.array([2, 1, nan], dtype=object)), 1)
         # minimum on object continues to propagate NaNs
-        assert_equal(np.minimum.reduce(np.array([1, nan], dtype=object)), nan)
+        assert_(np.minimum.reduce(np.array([1, nan], dtype=object)) !=
+                np.minimum.reduce(np.array([1, nan], dtype=object)))
+
+
+class TestBool:
     def test_exceptions(self):
         a = np.ones(1, dtype=np.bool)
         assert_raises(TypeError, np.negative, a)
