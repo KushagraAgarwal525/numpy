@@ -4528,8 +4528,10 @@ class MaskedArray(ndarray):
             else:
                 self._mask = invalid
             np.copyto(self._data, self.fill_value, where=invalid)
-        new_mask = mask_or(other_mask, invalid)
-        self._mask = mask_or(self._mask, new_mask)
+        # Incorporate other_mask without shrinking an explicit all-False mask
+        # (gh-25589); match multiply/add in-place behavior.
+        if other_mask is not nomask:
+            self._mask = mask_or(self._mask, other_mask, shrink=False)
         return self
 
     def __float__(self):
@@ -7199,10 +7201,11 @@ def power(a, b, third=None):
     """
     if third is not None:
         raise MaskError("3-argument power not supported.")
-    # Get the masks
+    # Get the masks. Do not shrink: other binary masked ops keep an explicit
+    # all-False mask array (gh-25589).
     ma = getmask(a)
     mb = getmask(b)
-    m = mask_or(ma, mb)
+    m = mask_or(ma, mb, shrink=False)
     # Get the rawdata
     fa = getdata(a)
     fb = getdata(b)

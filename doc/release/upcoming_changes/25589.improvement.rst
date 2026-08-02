@@ -1,0 +1,6 @@
+`numpy.ma.power` preserves explicit all-False masks
+---------------------------------------------------
+`numpy.ma.power` and in-place ``**=`` no longer shrink an explicit all-False
+mask to ``nomask``. This matches other masked binary operations such as
+multiplication, so indexing the result mask remains safe when the input used
+``shrink=False`` (or an all-False mask array).
