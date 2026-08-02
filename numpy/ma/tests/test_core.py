@@ -2769,6 +2769,44 @@ class TestUfuncs:
             # also check that allclose uses ma ufuncs, to avoid warning
             allclose(m, 0.5)
 
+    def test_inplace_domained_ufunc_out(self):
+        # gh-4065: domained ufuncs with out=input must not re-check the domain
+        # on already-written results (log(1)->0 looked out-of-domain).
+        with np.errstate(invalid='ignore', divide='ignore'):
+            for fn in (np.log, np.log2, np.log10, log, log10):
+                x = array([1.0, 2.0, -1.0], mask=[0, 1, 0])
+                expected = fn(x)
+                result = fn(x, out=x)
+                assert_(result is x)
+                assert_equal(result.mask, expected.mask)
+                assert_equal(result.filled(0), expected.filled(0))
+
+        # Valid in-place log must stay unmasked (the original report).
+        x = array([1.0])
+        result = np.log(x, out=x)
+        assert_equal(result, array([0.0]))
+        assert_equal(result.mask, False)
+
+        x = array([1.0])
+        result = log(x, out=x)
+        assert_equal(result, array([0.0]))
+        assert_equal(result.mask, False)
+
+        # Still mask true domain violations when out aliases input.
+        x = array([-1.0])
+        with np.errstate(invalid='ignore'):
+            result = np.log(x, out=x)
+        assert_(np.all(result.mask))
+
+        # Binary domained op with out aliasing an input.
+        a = array([1.0, 2.0])
+        b = array([2.0, 0.0])
+        with np.errstate(divide='ignore', invalid='ignore'):
+            expected = divide(array([1.0, 2.0]), b)
+            result = divide(a, b, out=a)
+        assert_(result is a)
+        assert_equal(result.mask, expected.mask)
+
     def test_masked_array_underflow(self):
         x = np.arange(0, 3, 0.1)
         X = np.ma.array(x)

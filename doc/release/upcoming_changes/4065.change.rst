@@ -1,0 +1,6 @@
+MaskedArray in-place domain ufuncs with ``out=``
+------------------------------------------------
+Domained ufuncs such as `numpy.log` applied in-place to a `numpy.ma.MaskedArray`
+(``out`` aliasing an input) no longer incorrectly mask valid results. Previously
+the domain was re-checked on already-written outputs (for example ``log(1)``
+became ``0`` and was treated as out-of-domain).
