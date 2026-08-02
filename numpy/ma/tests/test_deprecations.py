@@ -38,8 +38,13 @@ class TestArgsort:
 
     def test_matches_ndarray_default(self):
         a = np.ma.array([[3, 1], [4, 2]], mask=[[0, 0], [0, 1]])
-        assert_equal(a.argsort(), np.argsort(np.asarray(a), axis=-1))
-        assert_equal(np.ma.argsort(a), np.argsort(np.asarray(a)))
+        # Default axis matches explicit -1 and preserves shape (unlike old None)
+        assert_equal(a.argsort(), a.argsort(axis=-1))
+        assert_equal(np.ma.argsort(a), np.ma.argsort(a, axis=-1))
+        assert_equal(a.argsort().shape, a.shape)
+        # Unmasked data: ma.argsort agrees with np.argsort on the underlying array
+        b = np.ma.array([[3, 1], [4, 2]])
+        assert_equal(b.argsort(), np.argsort(np.asarray(b), axis=-1))
 
 
 class TestMinimumMaximum:
