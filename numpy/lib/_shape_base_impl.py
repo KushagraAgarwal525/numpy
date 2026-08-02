@@ -10,6 +10,7 @@ from numpy._core.numeric import (
     array,
     asanyarray,
     asarray,
+    empty,
     normalize_axis_tuple,
     zeros,
     zeros_like,
@@ -391,11 +392,19 @@ def apply_along_axis(func1d, axis, arr, *args, **kwargs):
     # remove the requested axis, and add the new ones on the end.
     # laid out so that each write is contiguous.
     # for a tuple index inds, buff[inds] = func1d(inarr_view[inds])
-    if not isinstance(res, matrix):
-        buff = zeros_like(res, shape=inarr_view.shape[:-1] + res.shape)
+    buff_shape = inarr_view.shape[:-1] + res.shape
+    # Fixed-width string/bytes dtypes take their itemsize from the first
+    # result, so later longer results would be truncated (gh-24689).  Buffer
+    # as object and cast once after all results are known, matching the
+    # approach used by np.vectorize for flexible string outputs.
+    string_char = res.dtype.char if res.dtype.char in 'SU' else None
+    if string_char is not None:
+        buff = empty(buff_shape, dtype=object)
+    elif not isinstance(res, matrix):
+        buff = zeros_like(res, shape=buff_shape)
     else:
         # Matrices are nasty with reshaping, so do not preserve them here.
-        buff = zeros(inarr_view.shape[:-1] + res.shape, dtype=res.dtype)
+        buff = zeros(buff_shape, dtype=res.dtype)
 
     # permutation of axes such that out = buff.transpose(buff_permute)
     buff_dims = list(range(buff.ndim))
@@ -409,6 +418,9 @@ def apply_along_axis(func1d, axis, arr, *args, **kwargs):
     buff[ind0] = res
     for ind in inds:
         buff[ind] = asanyarray(func1d(inarr_view[ind], *args, **kwargs))
+
+    if string_char is not None:
+        buff = asanyarray(buff, dtype=string_char)
 
     res = transpose(buff, buff_permute)
     return conv.wrap(res)

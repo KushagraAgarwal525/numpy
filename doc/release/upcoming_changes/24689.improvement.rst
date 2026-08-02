@@ -1,0 +1,7 @@
+``numpy.apply_along_axis`` no longer truncates variable-length string results
+------------------------------------------------------------------------------
+``apply_along_axis`` previously allocated its output using the dtype of the
+first ``func1d`` result. For fixed-width string and bytes dtypes that locked
+in a too-small itemsize, so later longer results were silently truncated.
+Results are now buffered as Python objects and cast once after all slices
+have been evaluated, so the output width matches the longest value.

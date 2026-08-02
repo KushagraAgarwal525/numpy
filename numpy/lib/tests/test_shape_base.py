@@ -298,6 +298,32 @@ class TestApplyAlongAxis:
         for i in np.ndindex(actual.shape):
             assert_equal(type(actual[i]), type(expected[i]))
 
+    def test_string_truncation(self):
+        # gh-24689: fixed-width string dtype from the first result must not
+        # truncate later longer string results.
+        numbers = np.arange(20).astype(str)[:, np.newaxis]
+        expected = np.array([''.join(row) for row in numbers])
+        actual = np.apply_along_axis(''.join, 1, numbers)
+        assert_array_equal(actual, expected)
+        assert_equal(actual.dtype, expected.dtype)
+
+        # same issue for bytes
+        numbers_b = np.arange(20).astype('S')[:, np.newaxis]
+        expected_b = np.array([b''.join(row) for row in numbers_b])
+        actual_b = np.apply_along_axis(lambda row: b''.join(row), 1, numbers_b)
+        assert_array_equal(actual_b, expected_b)
+        assert_equal(actual_b.dtype, expected_b.dtype)
+
+        # multi-dimensional string results along the axis
+        def repeat_chars(row):
+            return np.array([row[0] * 2, row[0] * 3])
+
+        arr = np.array([['a'], ['bb'], ['ccc']])
+        expected_md = np.stack([repeat_chars(row) for row in arr], axis=0)
+        actual_md = np.apply_along_axis(repeat_chars, 1, arr)
+        assert_array_equal(actual_md, expected_md)
+        assert_equal(actual_md.dtype, expected_md.dtype)
+
 
 class TestApplyOverAxes:
     def test_simple(self):
