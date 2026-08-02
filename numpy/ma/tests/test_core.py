@@ -2700,6 +2700,36 @@ class TestUfuncs:
         assert_equal(test.mask, control.mask)
         assert_(not isinstance(test.mask, MaskedArray))
 
+    def test_complex_domain_ufuncs(self):
+        # Real-valued domain restrictions must not mask valid complex results
+        # (gh-8516).
+        data = np.array([[-1.0 + 0.5j, 2 + 3j],
+                         [0.3 - 4j, 5 + 27j]])
+        a = masked_where(np.abs(data) > 10, data)
+        for np_uf, ma_uf in ((np.log, log),
+                             (np.sqrt, sqrt),
+                             (np.log10, log10),
+                             (np.log2, numpy.ma.core.log2)):
+            expected = np_uf(data)
+            for result in (np_uf(a), ma_uf(a)):
+                assert_equal(result.mask, a.mask)
+                assert_equal(result.filled(0),
+                             np.where(a.mask, 0, expected))
+
+        # Zero remains out of domain for complex log.
+        z0 = masked_array(0j)
+        assert_(log(z0) is masked)
+        assert_(np.log(z0) is masked)
+
+        # Scalar complex sqrt(-1) must match ndarray behavior.
+        assert_equal(np.sqrt(masked_array(-1 + 0j)), 1j)
+        assert_equal(sqrt(masked_array(-1 + 0j)), 1j)
+
+        # Real inputs still respect the domain.
+        real = masked_array([-1.0, 0.0, 0.5, 2.0])
+        assert_equal(sqrt(real).mask, [True, False, False, False])
+        assert_equal(log(real).mask, [True, True, False, False])
+
     def test_treatment_of_NotImplemented(self):
         # Check that NotImplemented is returned at appropriate places
 
