@@ -3221,7 +3221,7 @@ add_newdoc('numpy._core.umath', 'positive',
     Notes
     -----
     Equivalent to `x.copy()`, but only defined for types that support
-    arithmetic.
+    arithmetic. Boolean input is returned unchanged (as with `absolute`).
 
     Examples
     --------
@@ -3230,6 +3230,9 @@ add_newdoc('numpy._core.umath', 'positive',
     >>> x1 = np.array(([1., -1.]))
     >>> np.positive(x1)
     array([ 1., -1.])
+
+    >>> np.positive(np.array([True, False]))
+    array([ True, False])
 
     The unary ``+`` operator can be used as a shorthand for ``np.positive`` on
     ndarrays.

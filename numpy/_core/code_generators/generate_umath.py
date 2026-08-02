@@ -526,6 +526,8 @@ defdict = {
     Ufunc(1, 1, None,
           docstrings.get('numpy._core.umath.positive'),
           'PyUFunc_SimpleUniformOperationTypeResolver',
+          # Reuse BOOL_absolute: |x| == x for booleans (gh-32100).
+          TD('?', cfunc_alias='absolute', dispatch=[('loops_logical', '?')]),
           TD(ints + flts + timedeltaonly),
           TD(cmplx, f='pos'),
           TD(O, f='PyNumber_Positive'),
