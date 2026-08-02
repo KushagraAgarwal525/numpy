@@ -366,7 +366,9 @@ with pytest.warns(RuntimeWarning):
 +u8
 +u4
 +td
++b_
 +AR_f
++AR_b
 
 abs(c16)
 abs(c8)
