@@ -4758,9 +4758,11 @@ class TestMaskedArrayFunctions:
         assert_equal(d._mask, tmp)
 
         with np.errstate(invalid="warn"):
-            # The fill value is 1e20, it cannot be converted to `int`:
-            with pytest.warns(RuntimeWarning, match="invalid value"):
-                ixm = xm.astype(int)
+            # The fill value is 1e20, it cannot be converted to `int`.
+            # Incompatible fill values are reset to the new dtype default
+            # (gh-28255) instead of warning and overflowing.
+            ixm = xm.astype(int)
+        assert_equal(ixm.fill_value, default_fill_value(np.dtype(int)))
         d = where(ixm > 2, ixm, masked)
         assert_equal(d, [-9, -9, -9, -9, -9, 4, -9, -9, 10, -9, -9, 3])
         assert_equal(d.dtype, ixm.dtype)
