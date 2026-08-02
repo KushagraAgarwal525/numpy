@@ -474,6 +474,44 @@ class TestFFT1D:
         assert result is out
         assert_array_equal(result, expected)
 
+    @pytest.mark.parametrize("x_shape,s_tuple", [
+        ((4, 4, 4), (6, 6, 6)),  # larger all dims
+        ((4, 4, 4), (2, 4, 4)),  # smaller first dim
+        ((4, 4, 4), (4, 4, 6)),  # larger last dim
+        ((3, 4, 5), (7, 8, 9)),  # issue gh-28890
+    ])
+    @pytest.mark.parametrize("axes", [(0, 1, 2), (2, 0, 1), (-1, 0, 1)])
+    @pytest.mark.parametrize("fft", [np.fft.fftn, np.fft.ifftn])
+    def test_fftn_out_and_s_nontrivial(self, x_shape, s_tuple, axes, fft):
+        # When `out` matches the final result shape, N-D FFTs must succeed even
+        # if intermediate axes change size (gh-28890).
+        rng = np.random.default_rng(42)
+        x = rng.random(x_shape) + 1j * rng.random(x_shape)
+        x.flags.writeable = False
+
+        expected = fft(x, s=s_tuple, axes=axes)
+        out = np.empty(expected.shape, dtype=expected.dtype)
+        result = fft(x, s=s_tuple, axes=axes, out=out)
+        assert result is out
+        assert_allclose(result, expected)
+
+    @pytest.mark.parametrize("x_shape,s_tuple", [
+        ((4, 4, 4), (6, 6, 6)),
+        ((4, 4, 4), (2, 4, 4)),
+        ((3, 4, 5), (7, 8, 9)),
+    ])
+    @pytest.mark.parametrize("axes", [(0, 1, 2), (2, 0, 1)])
+    def test_rfftn_out_and_s_nontrivial(self, x_shape, s_tuple, axes):
+        rng = np.random.default_rng(42)
+        x = rng.random(x_shape)
+        x.flags.writeable = False
+
+        expected = np.fft.rfftn(x, s=s_tuple, axes=axes)
+        out = np.empty(expected.shape, dtype=expected.dtype)
+        result = np.fft.rfftn(x, s=s_tuple, axes=axes, out=out)
+        assert result is out
+        assert_allclose(result, expected)
+
     @pytest.mark.parametrize("s", [(9, 5, 5), (3, 3, 3)])
     def test_irfftn_out_and_s_interaction(self, s):
         # Since for irfftn, the output is real and thus cannot be used for
