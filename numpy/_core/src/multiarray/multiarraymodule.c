@@ -3662,6 +3662,42 @@ array_result_type(PyObject *NPY_UNUSED(dummy), PyObject *const *args, Py_ssize_t
             npy_mark_tmp_array_if_pyscalar(obj, arr[narr], NULL);
             ++narr;
         }
+        else if (obj == (PyObject *)&PyLong_Type ||
+                 obj == (PyObject *)&PyFloat_Type ||
+                 obj == (PyObject *)&PyComplex_Type ||
+                 obj == (PyObject *)&PyBool_Type) {
+            /*
+             * Builtin Python type objects should behave like their zero-value
+             * instances for NEP 50 weak promotion (gh-31037).  Without this,
+             * PyArray_DescrConverter maps them to concrete default dtypes
+             * (e.g. int -> int64), so result_type(np.int32, int) differs from
+             * result_type(np.int32, 1).
+             */
+            PyObject *representative;
+            if (obj == (PyObject *)&PyBool_Type) {
+                representative = PyBool_FromLong(0);
+            }
+            else if (obj == (PyObject *)&PyLong_Type) {
+                representative = PyLong_FromLong(0);
+            }
+            else if (obj == (PyObject *)&PyFloat_Type) {
+                representative = PyFloat_FromDouble(0.0);
+            }
+            else {
+                representative = PyComplex_FromDoubles(0.0, 0.0);
+            }
+            if (representative == NULL) {
+                goto finish;
+            }
+            arr[narr] = (PyArrayObject *)PyArray_FROM_O(representative);
+            if (arr[narr] == NULL) {
+                Py_DECREF(representative);
+                goto finish;
+            }
+            npy_mark_tmp_array_if_pyscalar(representative, arr[narr], NULL);
+            Py_DECREF(representative);
+            ++narr;
+        }
         else {
             if (!PyArray_DescrConverter(obj, &dtypes[ndtypes])) {
                 goto finish;
