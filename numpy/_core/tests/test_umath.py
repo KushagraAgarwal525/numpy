@@ -3234,11 +3234,17 @@ class TestAbsoluteNegative:
 
 class TestPositive:
     def test_valid(self):
-        valid_dtypes = [bool, int, float, complex, object]
+        valid_dtypes = [int, float, complex, object]
         for dtype in valid_dtypes:
             x = np.arange(5, dtype=dtype)
             result = np.positive(x)
             assert_equal(x, result, err_msg=str(dtype))
+
+        # gh-32100: boolean identity (arange does not support bool length > 2)
+        x = np.array([False, True, True, False], dtype=bool)
+        result = np.positive(x)
+        assert_equal(x, result)
+        assert result.dtype == np.dtype(bool)
 
     def test_invalid(self):
         with assert_raises(TypeError):
