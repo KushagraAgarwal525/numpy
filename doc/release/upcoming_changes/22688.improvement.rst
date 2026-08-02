@@ -1,0 +1,6 @@
+``nanmedian`` / ``ma.median`` no longer overflow for large ``float16`` values
+-----------------------------------------------------------------------------
+Even-length medians of large finite ``float16`` values (for example values near
+``finfo(float16).max``) previously overflowed to ``inf`` on the masked-array
+code path used by `nanmedian` for small axis sizes. The average of the two
+middle values is now accumulated in ``float32``, matching `mean` / `median`.

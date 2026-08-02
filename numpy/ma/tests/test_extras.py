@@ -1197,6 +1197,22 @@ class TestMedian:
         o = np.ma.masked_array(np.zeros(()))
         assert_equal(np.ma.median(d, out=o), o)
 
+    def test_float16_no_overflow(self):
+        # gh-22688: ma.median summed float16 values without promoting, so
+        # averaging two large finite values overflowed to inf.
+        a = np.ma.array([[1, 1e4, 4e4],
+                         [1, 1e4, 4e4]], dtype=np.float16)
+        with warnings.catch_warnings(record=True) as w:
+            warnings.simplefilter('always')
+            result = np.ma.median(a, axis=0)
+        assert_equal(result, np.array([1, 1e4, 4e4], dtype=np.float16))
+        assert_equal(result.dtype, np.dtype(np.float16))
+        assert_(not any("overflow" in str(wi.message) for wi in w))
+        # Still keep non-finite medians as inf (not masked).
+        inf_a = np.ma.array([[np.inf, np.inf],
+                             [np.inf, np.inf]], dtype=np.float16)
+        assert_equal(np.ma.median(inf_a, axis=-1), np.inf)
+
     def test_nan_behavior(self):
         a = np.ma.masked_array(np.arange(24, dtype=float))
         a[::3] = np.ma.masked
