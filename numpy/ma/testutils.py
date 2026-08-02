@@ -130,10 +130,8 @@ def assert_equal(actual, desired, err_msg=''):
     if isinstance(desired, (list, tuple)) and isinstance(actual, (list, tuple)):
         return _assert_equal_on_sequences(actual, desired, err_msg='')
     if not (isinstance(actual, ndarray) or isinstance(desired, ndarray)):
-        msg = build_err_msg([actual, desired], err_msg,)
-        if not desired == actual:
-            raise AssertionError(msg)
-        return
+        # Delegate to numpy.testing so NaN/NaT compare equal (gh-6661).
+        return numpy.testing.assert_equal(actual, desired, err_msg=err_msg)
     # Case #4. arrays or equivalent
     if ((actual is masked) and not (desired is masked)) or \
             ((desired is masked) and not (actual is masked)):
