@@ -659,6 +659,17 @@ class TestRegression:
         with pytest.warns(DeprecationWarning):
             a.shape = (-1, 2)
 
+    def test_reshape_zero_size_keeps_zero_strides(self):
+        # gh-21918: reshaping a 0-size array must keep zero strides, matching
+        # freshly constructed empty arrays (gh-21477).
+        a = np.ones((2, 0, 3))
+        assert_equal(a.strides, (0, 0, 0))
+        b = a.reshape((3, 0, 2))
+        assert_equal(b.strides, (0, 0, 0))
+        assert_equal(a.reshape((0, 6)).strides, (0, 0))
+        assert_equal(a.reshape((3, 0, 2), order='F').strides, (0, 0, 0))
+        assert_equal(np.empty((0, 3)).reshape((3, 0)).strides, (0, 0))
+
     def test_reshape_trailing_ones_strides(self):
         # GitHub issue gh-2949, bad strides for trailing ones of new shape
         a = np.zeros(12, dtype=np.int32)[::2]  # not contiguous
