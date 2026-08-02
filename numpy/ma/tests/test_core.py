@@ -5864,6 +5864,49 @@ def test_ufunc_with_out_varied():
     assert_equal(res_pos.data, expected.data)
 
 
+def test_ma_ufunc_returns_out():
+    # np.ma ufunc wrappers should return the supplied out object (gh-7394).
+    # ndarray out
+    a = np.ones(2)
+    assert_(np.ma.add([1, 1], 2, out=a) is a)
+    assert_equal(a, [3, 3])
+
+    # MaskedArray out, including when out aliases an input
+    x = array([1., 2., 3.], mask=[0, 0, 1])
+    y = np.ma.add(x, 1., out=x)
+    assert_(y is x)
+    assert_equal(x.data, [2., 3., 3.])
+    assert_equal(x.mask, [False, False, True])
+
+    out = array([0., 0., 0.], mask=[0, 0, 0])
+    a = array([1., 2., 3.], mask=[1, 0, 0])
+    b = array([10., 20., 30.], mask=[1, 0, 0])
+    res = np.ma.add(a, b, out=out)
+    assert_(res is out)
+    assert_equal(out.mask, [True, False, False])
+    assert_equal(out.data, [1., 22., 33.])
+
+    # Keyword / positional / 1-tuple out forms
+    out_kw = np.ma.empty(2)
+    assert_(np.ma.multiply([2, 3], 4, out=out_kw) is out_kw)
+    out_pos = np.ma.empty(2)
+    assert_(np.ma.multiply([2, 3], 4, out_pos) is out_pos)
+    out_tup = np.ma.empty(2)
+    assert_(np.ma.multiply([2, 3], 4, out=(out_tup,)) is out_tup)
+
+    # Unary and domained binary wrappers
+    out_sqrt = array([0., 0.], mask=[0, 0])
+    z = array([4., -1.], mask=[0, 0])
+    res = np.ma.sqrt(z, out=out_sqrt)
+    assert_(res is out_sqrt)
+    assert_equal(out_sqrt.mask, [False, True])
+
+    out_div = array([0., 0.], mask=[0, 0])
+    res = np.ma.divide(array([1., 2.]), array([1., 0.]), out=out_div)
+    assert_(res is out_div)
+    assert_(out_div.mask[1])
+
+
 def test_astype_mask_ordering():
     descr = np.dtype([('v', int, 3), ('x', [('y', float)])])
     x = array([

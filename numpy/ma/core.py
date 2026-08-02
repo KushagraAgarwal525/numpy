@@ -941,6 +941,84 @@ class _DomainGreaterEqual:
             return umath.less(x, self.critical_value)
 
 
+def _prepare_masked_ufunc_out(args, kwargs):
+    """Normalize ``out`` for masked ufunc wrappers.
+
+    Parameters
+    ----------
+    args, kwargs :
+        Extra positional/keyword arguments forwarded to the underlying ufunc.
+
+    Returns
+    -------
+    out : ndarray or MaskedArray or None
+        Original ``out`` object that should be returned to the caller when
+        provided (unwrapped if passed as a 1-tuple).
+    args : tuple
+        Positional args with any ``out`` replaced by a pure ndarray write
+        target so MaskedArray ``__array_wrap__`` does not clear input masks
+        when ``out`` aliases an input.
+    kwargs : dict
+        Keyword args with ``out`` similarly replaced when present.
+
+    """
+    args = list(args)
+    kwargs = dict(kwargs)
+    out = kwargs.get('out')
+
+    def _pure_out(obj):
+        # Write through a plain ndarray view so MA wrap logic is skipped.
+        return getdata(obj, subok=False)
+
+    if out is not None:
+        if isinstance(out, tuple):
+            if len(out) == 1:
+                out_obj = out[0]
+                kwargs['out'] = _pure_out(out_obj)
+                return out_obj, tuple(args), kwargs
+            # Multi-output: leave untouched; caller keeps existing behavior.
+            return None, tuple(args), kwargs
+        kwargs['out'] = _pure_out(out)
+        return out, tuple(args), kwargs
+
+    if args:
+        # ufunc signature places ``out`` first among optional positionals.
+        maybe_out = args[0]
+        if isinstance(maybe_out, tuple):
+            if len(maybe_out) == 1:
+                out_obj = maybe_out[0]
+                args[0] = _pure_out(out_obj)
+                return out_obj, tuple(args), kwargs
+            return None, tuple(args), kwargs
+        if maybe_out is None:
+            return None, tuple(args), kwargs
+        args[0] = _pure_out(maybe_out)
+        return maybe_out, tuple(args), kwargs
+
+    return None, tuple(args), kwargs
+
+
+def _return_masked_ufunc_result(result, m, prototypes, out=None):
+    """Return ``out`` (updated) or a new MaskedArray view of ``result``."""
+    if out is not None:
+        if isinstance(out, MaskedArray):
+            out._mask = m
+            for p in prototypes:
+                if isinstance(p, MaskedArray):
+                    out._update_from(p)
+                    break
+            return out
+        return out
+
+    masked_result = result.view(get_masked_subclass(*prototypes))
+    masked_result._mask = m
+    for p in prototypes:
+        if isinstance(p, MaskedArray):
+            masked_result._update_from(p)
+            break
+    return masked_result
+
+
 class _MaskedUFunc:
     def __init__(self, ufunc):
         self.f = ufunc
@@ -982,7 +1060,11 @@ class _MaskedUnaryOperation(_MaskedUFunc):
         Execute the call behavior.
 
         """
+        out, args, kwargs = _prepare_masked_ufunc_out(args, kwargs)
         d = getdata(a)
+        # Capture mask before the ufunc: if ``out`` aliases ``a``, writing
+        # through a MaskedArray out historically cleared ``a.mask``.
+        ma = getmask(a)
         # Deal with domain
         if self.domain is not None:
             # Case 1.1. : Domained function
@@ -993,16 +1075,18 @@ class _MaskedUnaryOperation(_MaskedUFunc):
             # Make a mask
             m = ~umath.isfinite(result)
             m |= self.domain(d)
-            m |= getmask(a)
+            m |= ma
         else:
             # Case 1.2. : Function without a domain
             # Get the result and the mask
             with np.errstate(divide='ignore', invalid='ignore'):
                 result = self.f(d, *args, **kwargs)
-            m = getmask(a)
+            m = ma
 
         if not result.ndim:
             # Case 2.1. : The result is scalarscalar
+            if out is not None:
+                return _return_masked_ufunc_result(result, m, (a,), out=out)
             if m:
                 return masked
             return result
@@ -1019,11 +1103,7 @@ class _MaskedUnaryOperation(_MaskedUFunc):
                 np.copyto(result, d, where=m)
             except TypeError:
                 pass
-        # Transform to
-        masked_result = result.view(get_masked_subclass(a))
-        masked_result._mask = m
-        masked_result._update_from(a)
-        return masked_result
+        return _return_masked_ufunc_result(result, m, (a,), out=out)
 
 
 class _MaskedBinaryOperation(_MaskedUFunc):
@@ -1064,14 +1144,16 @@ class _MaskedBinaryOperation(_MaskedUFunc):
         Execute the call behavior.
 
         """
+        out, args, kwargs = _prepare_masked_ufunc_out(args, kwargs)
         # Get the data, as ndarray
         (da, db) = (getdata(a), getdata(b))
+        # Capture masks before the ufunc runs (see unary path).
+        (ma, mb) = (getmask(a), getmask(b))
         # Get the result
         with np.errstate():
             np.seterr(divide='ignore', invalid='ignore')
             result = self.f(da, db, *args, **kwargs)
         # Get the mask for the result
-        (ma, mb) = (getmask(a), getmask(b))
         if ma is nomask:
             if mb is nomask:
                 m = nomask
@@ -1084,6 +1166,8 @@ class _MaskedBinaryOperation(_MaskedUFunc):
 
         # Case 1. : scalar
         if not result.ndim:
+            if out is not None:
+                return _return_masked_ufunc_result(result, m, (a, b), out=out)
             if m:
                 return masked
             return result
@@ -1097,14 +1181,7 @@ class _MaskedBinaryOperation(_MaskedUFunc):
             except Exception:
                 pass
 
-        # Transforms to a (subclass of) MaskedArray
-        masked_result = result.view(get_masked_subclass(a, b))
-        masked_result._mask = m
-        if isinstance(a, MaskedArray):
-            masked_result._update_from(a)
-        elif isinstance(b, MaskedArray):
-            masked_result._update_from(b)
-        return masked_result
+        return _return_masked_ufunc_result(result, m, (a, b), out=out)
 
     def reduce(self, target, axis=0, dtype=None):
         """
@@ -1206,21 +1283,26 @@ class _DomainedBinaryOperation(_MaskedUFunc):
 
     def __call__(self, a, b, *args, **kwargs):
         "Execute the call behavior."
+        out, args, kwargs = _prepare_masked_ufunc_out(args, kwargs)
         # Get the data
         (da, db) = (getdata(a), getdata(b))
+        # Capture masks before the ufunc runs (see unary path).
+        (ma, mb) = (getmask(a), getmask(b))
         # Get the result
         with np.errstate(divide='ignore', invalid='ignore'):
             result = self.f(da, db, *args, **kwargs)
         # Get the mask as a combination of the source masks and invalid
         m = ~umath.isfinite(result)
-        m |= getmask(a)
-        m |= getmask(b)
+        m |= ma
+        m |= mb
         # Apply the domain
         domain = ufunc_domain.get(self.f, None)
         if domain is not None:
             m |= domain(da, db)
         # Take care of the scalar case first
         if not m.ndim:
+            if out is not None:
+                return _return_masked_ufunc_result(result, m, (a, b), out=out)
             if m:
                 return masked
             else:
@@ -1237,14 +1319,7 @@ class _DomainedBinaryOperation(_MaskedUFunc):
         except Exception:
             pass
 
-        # Transforms to a (subclass of) MaskedArray
-        masked_result = result.view(get_masked_subclass(a, b))
-        masked_result._mask = m
-        if isinstance(a, MaskedArray):
-            masked_result._update_from(a)
-        elif isinstance(b, MaskedArray):
-            masked_result._update_from(b)
-        return masked_result
+        return _return_masked_ufunc_result(result, m, (a, b), out=out)
 
 
 # Unary ufuncs
