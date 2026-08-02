@@ -506,12 +506,16 @@ def _check_fill_value(fill_value, ndtype):
     else:
         # In case we want to convert 1e20 to int.
         # Also in case of converting string arrays.
+        # Use errstate so ndarray casts that would otherwise only warn
+        # (e.g. np.array(1e20) -> int64) raise like Python scalars do.
         try:
-            fill_value = np.asarray(fill_value, dtype=ndtype)
-        except (OverflowError, ValueError) as e:
-            # Raise TypeError instead of OverflowError or ValueError.
-            # OverflowError is seldom used, and the real problem here is
-            # that the passed fill_value is not compatible with the ndtype.
+            with np.errstate(invalid='raise', over='raise'):
+                fill_value = np.asarray(fill_value, dtype=ndtype)
+        except (OverflowError, ValueError, FloatingPointError) as e:
+            # Raise TypeError instead of OverflowError, ValueError, or
+            # FloatingPointError. OverflowError is seldom used, and the
+            # real problem here is that the passed fill_value is not
+            # compatible with the ndtype.
             err_msg = "Cannot convert fill_value %s to dtype %s"
             raise TypeError(err_msg % (fill_value, ndtype)) from e
     return np.array(fill_value)
@@ -3135,7 +3139,15 @@ class MaskedArray(ndarray):
 
         # Finalize the fill_value
         if self._fill_value is not None:
-            self._fill_value = _check_fill_value(self._fill_value, self.dtype)
+            try:
+                self._fill_value = _check_fill_value(self._fill_value,
+                                                     self.dtype)
+            except TypeError:
+                # Incompatible with the new dtype (e.g. float default 1e20
+                # after ones_like(..., dtype=int64)). Reset so the new
+                # dtype's default is used, matching _fill_value is None
+                # and view(..., dtype=...) behavior. See gh-28255.
+                self._fill_value = None
         elif self.dtype.names is not None:
             # Finalize the default fill_value for structured arrays
             self._fill_value = _check_fill_value(None, self.dtype)

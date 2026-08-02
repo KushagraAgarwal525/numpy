@@ -1,0 +1,8 @@
+MaskedArray fill_value casting no longer silently overflows
+------------------------------------------------------------
+Converting an incompatible ``fill_value`` to a new dtype (for example the
+float default ``1e20`` when creating ``ones_like(..., dtype=int64)``) now
+raises ``TypeError`` from ``_check_fill_value``, matching the existing
+behavior for Python scalars.  When this happens during array finalization
+(e.g. ``ones_like`` / ``astype``), the fill value is reset so the new
+dtype's default is used instead of a warned, overflowed integer.

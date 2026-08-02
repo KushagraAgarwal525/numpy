@@ -2287,6 +2287,30 @@ class TestFillingValues:
         assert_equal(fval, default_fill_value(b"camelot!"))
         assert_raises(TypeError, _check_fill_value, 1e+20, int)
         assert_raises(TypeError, _check_fill_value, 'stuff', int)
+        # ndarray fill values must raise the same way as Python scalars
+        # (previously only warned and produced a garbage int). See gh-28255.
+        assert_raises(TypeError, _check_fill_value, np.array(1e+20), int)
+
+    def test_ones_like_fill_value_after_access(self):
+        # gh-28255: accessing fill_value materializes the float default
+        # (1e20). Creating a like-array with an integer dtype must still
+        # get the integer default, not a warned overflowed value.
+        expected = default_fill_value(np.dtype(np.int64))
+        a = np.ma.arange(9.0)
+        assert a._fill_value is None
+        b = ones_like(a, dtype=np.int64)
+        assert_equal(b.fill_value, expected)
+
+        _ = a.fill_value  # materialize float default 1e20
+        assert a._fill_value is not None
+        with warnings.catch_warnings(record=True) as w:
+            warnings.simplefilter("always")
+            c = ones_like(a, dtype=np.int64)
+        assert_equal(c.fill_value, expected)
+        assert not any(issubclass(x.category, RuntimeWarning) for x in w)
+
+        d = a.astype(np.int64)
+        assert_equal(d.fill_value, expected)
 
     def test_fill_value_datetime_structured(self):
         # gh-29818
@@ -4734,9 +4758,11 @@ class TestMaskedArrayFunctions:
         assert_equal(d._mask, tmp)
 
         with np.errstate(invalid="warn"):
-            # The fill value is 1e20, it cannot be converted to `int`:
-            with pytest.warns(RuntimeWarning, match="invalid value"):
-                ixm = xm.astype(int)
+            # The fill value is 1e20, it cannot be converted to `int`.
+            # Incompatible fill values are reset to the new dtype default
+            # (gh-28255) instead of warning and overflowing.
+            ixm = xm.astype(int)
+        assert_equal(ixm.fill_value, default_fill_value(np.dtype(int)))
         d = where(ixm > 2, ixm, masked)
         assert_equal(d, [-9, -9, -9, -9, -9, 4, -9, -9, 10, -9, -9, 3])
         assert_equal(d.dtype, ixm.dtype)
