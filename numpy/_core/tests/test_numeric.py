@@ -1201,6 +1201,42 @@ class TestTypes:
         self.check_promotion_cases(np.result_type)
         assert_(np.result_type(None) == np.dtype(None))
 
+    @pytest.mark.parametrize("py_type, zero", [
+        (bool, False),
+        (int, 0),
+        (float, 0.0),
+        (complex, 0j),
+    ])
+    @pytest.mark.parametrize("np_dtype", [
+        np.bool_,
+        np.int8, np.int16, np.int32, np.int64,
+        np.uint8, np.uint16, np.uint32, np.uint64,
+        np.float16, np.float32, np.float64,
+        np.complex64, np.complex128,
+    ])
+    def test_result_type_python_type_weak_promotion(self, np_dtype, py_type,
+                                                    zero):
+        # gh-31037: Python builtin types (bool/int/float/complex) passed to
+        # result_type should behave like their zero-value instances under
+        # NEP 50 weak promotion, not like concrete default dtypes.
+        from_type = np.result_type(np_dtype, py_type)
+        from_instance = np.result_type(np_dtype, zero)
+        assert from_type == from_instance, (
+            f"result_type({np_dtype.__name__}, {py_type.__name__}) = "
+            f"{from_type} but result_type({np_dtype.__name__}, "
+            f"{zero!r}) = {from_instance}"
+        )
+
+    def test_result_type_python_type_with_array(self):
+        # Builtin type objects must not force default float64/int64 when
+        # combined with a narrower array dtype (documented NEP 50 intent).
+        assert_equal(np.result_type(int, np.array([1], np.float32)),
+                     np.dtype(np.float32))
+        assert_equal(np.result_type(float, np.array([1], np.float32)),
+                     np.dtype(np.float32))
+        assert_equal(np.result_type(complex, np.array([1], np.complex64)),
+                     np.dtype(np.complex64))
+
     def test_promote_types_endian(self):
         # promote_types should always return native-endian types
         assert_equal(np.promote_types('<i8', '<i8'), np.dtype('i8'))
