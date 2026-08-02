@@ -866,6 +866,10 @@ class _DomainCheckInterval:
         # nans at masked positions cause RuntimeWarnings, even though
         # they are masked. To avoid this we suppress warnings.
         with np.errstate(invalid='ignore'):
+            # Real interval restrictions do not apply to complex inputs
+            # (gh-8516); branch-cut results remain finite.
+            if np.iscomplexobj(x):
+                return np.zeros(np.shape(x), dtype=bool)
             return umath.logical_or(umath.greater(x, self.b),
                                     umath.less(x, self.a))
 
@@ -922,6 +926,10 @@ class _DomainGreater:
     def __call__(self, x):
         "Executes the call behavior."
         with np.errstate(invalid='ignore'):
+            # Complex log/log2/log10 are defined for all nonzero values; only
+            # zero is out of domain (gh-8516).
+            if np.iscomplexobj(x):
+                return umath.equal(x, 0)
             return umath.less_equal(x, self.critical_value)
 
 
@@ -938,6 +946,10 @@ class _DomainGreaterEqual:
     def __call__(self, x):
         "Executes the call behavior."
         with np.errstate(invalid='ignore'):
+            # Complex sqrt/arccosh are defined on the whole complex plane
+            # (gh-8516).
+            if np.iscomplexobj(x):
+                return np.zeros(np.shape(x), dtype=bool)
             return umath.less(x, self.critical_value)
 
 
