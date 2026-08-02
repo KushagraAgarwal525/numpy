@@ -3839,6 +3839,13 @@ class TestMaskedArrayMethods:
         a = array([1, 5, 2, 4, 3], mask=[1, 0, 0, 1, 0])
         assert_equal(np.argsort(a), argsort(a))
 
+        # gh-8701: default axis matches ndarray (-1), not flatten
+        a2 = array([[3, 1], [4, 2]], mask=[[0, 0], [0, 1]])
+        assert_equal(argsort(a2), np.argsort(a2.filled(fill_value=a2.fill_value),
+                                            axis=-1))
+        assert_equal(argsort(a2).shape, a2.shape)
+        assert_equal(argsort(a2, axis=None).shape, (a2.size,))
+
     def test_sort_stable_or_descending_throws(self):
         a = array([1, 5, 2, 4, 3], mask=[1, 0, 0, 1, 0])
         with pytest.raises(

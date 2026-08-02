@@ -1,0 +1,7 @@
+``np.ma.argsort`` default ``axis`` is now ``-1``
+------------------------------------------------
+The default ``axis`` for `numpy.ma.argsort` and `MaskedArray.argsort` is now
+``-1``, matching `numpy.argsort` and the long-standing documentation intent.
+A ``MaskedArrayFutureWarning`` had been emitted for this change since NumPy
+1.13 (gh-8701). Pass ``axis=None`` explicitly to restore the previous
+flattening behavior.
