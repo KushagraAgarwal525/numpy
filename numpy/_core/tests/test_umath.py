@@ -2773,6 +2773,9 @@ class TestFmax(_FilterInvalids):
         assert_equal(np.fmax.reduce(np.array([1.0, nan], dtype=object)), 1.0)
         # still prefer the larger finite value
         assert_equal(np.fmax.reduce(np.array([1, 2, nan], dtype=object)), 2)
+
+
+class TestFmin(_FilterInvalids):
     def test_reduce(self):
         dflt = np.typecodes['AllFloat']
         dint = np.typecodes['AllInteger']

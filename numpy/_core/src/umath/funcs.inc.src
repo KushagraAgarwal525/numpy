@@ -82,11 +82,24 @@ npy_Object@Kind@(PyObject *i1, PyObject *i2)
  * NaN-like check for object arrays: treat values that compare unequal to
  * themselves (value != value) as NaN. Matches float/complex NaN semantics
  * and seberg's suggested definition for object isnan (gh-28602 / gh-8975).
+ *
+ * Must use PyObject_RichCompare rather than PyObject_RichCompareBool: the
+ * Bool helper short-circuits identity (v == w) to EQ/!NE, which wrongly
+ * reports NaNs as non-NaN when both pointers are the same object.
  */
 static int
 npy_ObjectIsNan(PyObject *obj)
 {
-    return PyObject_RichCompareBool(obj, obj, Py_NE);
+    PyObject *cmp;
+    int ret;
+
+    cmp = PyObject_RichCompare(obj, obj, Py_NE);
+    if (cmp == NULL) {
+        return -1;
+    }
+    ret = PyObject_IsTrue(cmp);
+    Py_DECREF(cmp);
+    return ret;
 }
 
 /*
