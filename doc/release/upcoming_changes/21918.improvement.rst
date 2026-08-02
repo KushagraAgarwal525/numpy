@@ -1,0 +1,5 @@
+Reshape of empty arrays keeps zero strides
+------------------------------------------
+Reshaping a 0-size array now preserves zero strides, matching the strides of
+newly created empty arrays. Previously, ``reshape`` filled contiguous strides,
+which could point past the 1-byte placeholder allocation used for empty buffers.

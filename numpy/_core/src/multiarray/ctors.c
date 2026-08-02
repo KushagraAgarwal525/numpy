@@ -761,6 +761,19 @@ PyArray_NewFromDescr_int(
             /* fill the strides and set the contiguity flags */
             _array_fill_strides(fa->strides, dims, nd, descr->elsize,
                                 flags, &(fa->flags));
+            /*
+             * Empty (0-size) arrays must use zero strides so pointer
+             * arithmetic cannot walk off the 1-byte placeholder allocation
+             * (gh-21477).  Allocation below already enforces this when
+             * ``data == NULL``; also apply it for views (e.g. reshape) so
+             * reshaping an empty array does not invent non-zero strides
+             * (gh-21918).
+             */
+            if (is_zero) {
+                for (int i = 0; i < nd; i++) {
+                    fa->strides[i] = 0;
+                }
+            }
         }
         else {
             /* User to provided strides (user is responsible for correctness) */
