@@ -1,0 +1,6 @@
+``vectorize`` with ``signature`` no longer truncates string outputs
+-------------------------------------------------------------------
+Using `numpy.vectorize` with a ``signature`` no longer forces string/bytes
+outputs to length 1 when ``otypes`` requests a string type (or when the
+wrapped function returns strings). Output string width is now determined
+from the computed values, matching the non-signature code path.

@@ -2281,20 +2281,74 @@ def _calculate_shapes(broadcast_shape, dim_sizes, list_of_core_dims):
             for core_dims in list_of_core_dims]
 
 
+def _is_flexible_string_otype(dtype):
+    """True for unsized string/bytes typecodes used by vectorize otypes."""
+    return isinstance(dtype, str) and dtype in 'SU'
+
+
+def _result_needs_flexible_string_buffer(result):
+    """True if result is a string/bytes value whose width may grow later."""
+    if isinstance(result, (str, bytes)):
+        return True
+    if isinstance(result, np.generic):
+        return result.dtype.char in 'SU'
+    if isinstance(result, np.ndarray):
+        return result.dtype.char in 'SU'
+    return False
+
+
 def _create_arrays(broadcast_shape, dim_sizes, list_of_core_dims, dtypes,
                    results=None):
     """Helper for creating output arrays in vectorize."""
     shapes = _calculate_shapes(broadcast_shape, dim_sizes, list_of_core_dims)
     if dtypes is None:
         dtypes = [None] * len(shapes)
-    if results is None:
-        arrays = tuple(np.empty(shape=shape, dtype=dtype)
-                       for shape, dtype in zip(shapes, dtypes))
-    else:
-        arrays = tuple(np.empty_like(result, shape=shape, dtype=dtype)
-                       for result, shape, dtype
-                       in zip(results, shapes, dtypes))
-    return arrays
+    arrays = []
+    for i, (shape, dtype) in enumerate(zip(shapes, dtypes)):
+        # ``empty(..., dtype='U')`` creates ``<U1`` and truncates later writes.
+        # Use object buffers for flexible string otypes (and for inferred
+        # string results) so the final cast can size strings to the content,
+        # matching the non-signature vectorize path (gh-23442).
+        if _is_flexible_string_otype(dtype):
+            arrays.append(np.empty(shape, dtype=object))
+            continue
+        if results is None:
+            arrays.append(np.empty(shape=shape, dtype=dtype))
+            continue
+        result = results[i]
+        if dtype is None and _result_needs_flexible_string_buffer(result):
+            arrays.append(np.empty(shape, dtype=object))
+        else:
+            arrays.append(np.empty_like(result, shape=shape, dtype=dtype))
+    return tuple(arrays)
+
+
+def _cast_vectorize_string_outputs(outputs, otypes):
+    """Cast object string buffers to sized unicode/bytes arrays."""
+    if otypes is None:
+        casted = []
+        for output in outputs:
+            if output.dtype != object or output.size == 0:
+                casted.append(output)
+                continue
+            sample = output.flat[0]
+            if isinstance(sample, str) or (
+                    isinstance(sample, np.generic) and sample.dtype.char == 'U'):
+                casted.append(np.asanyarray(output, dtype='U'))
+            elif isinstance(sample, bytes) or (
+                    isinstance(sample, np.generic) and sample.dtype.char == 'S'):
+                casted.append(np.asanyarray(output, dtype='S'))
+            else:
+                casted.append(output)
+        return tuple(casted)
+
+    casted = []
+    for output, otype in zip(outputs, otypes):
+        if _is_flexible_string_otype(otype):
+            casted.append(np.asanyarray(output, dtype=otype))
+        else:
+            casted.append(output)
+    return tuple(casted)
 
 
 def _get_vectorize_dtype(dtype):
@@ -2704,6 +2758,7 @@ class vectorize:
             outputs = _create_arrays(broadcast_shape, dim_sizes,
                                      output_core_dims, otypes)
 
+        outputs = _cast_vectorize_string_outputs(outputs, otypes)
         return outputs[0] if nout == 1 else outputs
 
 
