@@ -1,7 +1,6 @@
 """Tests for numpy.ma.testutils helpers."""
 
 import numpy as np
-import pytest
 from numpy.ma.testutils import assert_equal
 from numpy.testing import assert_raises
 
@@ -12,8 +11,14 @@ class TestAssertEqual:
         assert_equal(np.nan, np.nan)
         assert_equal(float("nan"), float("nan"))
         assert_equal(np.float64("nan"), np.float64("nan"))
+        assert_equal(np.complex128("nan"), np.complex128("nan"))
         assert_raises(AssertionError, assert_equal, np.nan, 1.0)
         assert_raises(AssertionError, assert_equal, np.nan, 0)
+
+    def test_dtype_string_still_compares(self):
+        # Regression: ma tests rely on dtype == dtype-string via ``==``
+        assert_equal(np.dtype("|S8"), "|S8")
+        assert_equal(np.dtype(int), int)
 
     def test_nan_in_sequences(self):
         assert_equal([np.nan, 1.0], [np.nan, 1.0])
