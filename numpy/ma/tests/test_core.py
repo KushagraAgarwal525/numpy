@@ -2295,21 +2295,22 @@ class TestFillingValues:
         # gh-28255: accessing fill_value materializes the float default
         # (1e20). Creating a like-array with an integer dtype must still
         # get the integer default, not a warned overflowed value.
+        expected = default_fill_value(np.dtype(np.int64))
         a = np.ma.arange(9.0)
         assert a._fill_value is None
         b = ones_like(a, dtype=np.int64)
-        assert_equal(b.fill_value, default_fill_value(np.int64))
+        assert_equal(b.fill_value, expected)
 
         _ = a.fill_value  # materialize float default 1e20
         assert a._fill_value is not None
         with warnings.catch_warnings(record=True) as w:
             warnings.simplefilter("always")
             c = ones_like(a, dtype=np.int64)
-        assert_equal(c.fill_value, default_fill_value(np.int64))
+        assert_equal(c.fill_value, expected)
         assert not any(issubclass(x.category, RuntimeWarning) for x in w)
 
         d = a.astype(np.int64)
-        assert_equal(d.fill_value, default_fill_value(np.int64))
+        assert_equal(d.fill_value, expected)
 
     def test_fill_value_datetime_structured(self):
         # gh-29818
