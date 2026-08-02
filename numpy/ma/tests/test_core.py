@@ -4675,6 +4675,31 @@ class TestMaskedArrayFunctions:
         assert_almost_equal(x, y)
         assert_almost_equal(x._data, y._data)
 
+    def test_power_preserves_explicit_false_mask(self):
+        # gh-25589: power must not shrink an all-False mask to nomask;
+        # multiply and other binary ops keep the explicit mask array.
+        data = np.array([1, 2, 3])
+        false_mask = np.zeros(3, dtype=bool)
+        m = array(data, mask=false_mask)
+        assert_equal(m.mask, false_mask)
+        assert_(isinstance(m.mask, np.ndarray))
+
+        for result in (m ** 2, power(m, 2), m * 2):
+            assert_equal(result.mask, false_mask)
+            assert_(isinstance(result.mask, np.ndarray))
+            assert_equal(result.mask.shape, false_mask.shape)
+
+        m2 = array(data, mask=false_mask.copy())
+        m2 **= 2
+        assert_equal(m2.mask, false_mask)
+        assert_(isinstance(m2.mask, np.ndarray))
+        assert_equal(m2.mask.shape, false_mask.shape)
+
+        # Still leave nomask alone when neither operand has an explicit mask.
+        plain = array(data)
+        assert_(plain.mask is nomask)
+        assert_((plain ** 2).mask is nomask)
+
     def test_power_with_broadcasting(self):
         # Test power w/ broadcasting
         a2 = np.array([[1., 2., 3.], [4., 5., 6.]])
