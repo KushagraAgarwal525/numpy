@@ -3834,6 +3834,42 @@ class TestRoll:
         x = np.arange(4)
         assert_equal(np.roll(x, 2**100), x)
 
+    def test_roll_shift_sequence_single_axis_deprecated(self):
+        # gh-14277: multi-valued shift with axis=None or a single axis
+        # broadcasts onto that axis (summing shifts) contrary to the docs.
+        x = np.array([[1, 2], [3, 4]])
+        expected = np.roll(x, [-1, 1], (0, 1))
+        warn_msg = "Passing a sequence for 'shift'"
+
+        with pytest.warns(np.exceptions.VisibleDeprecationWarning,
+                          match=warn_msg):
+            y = np.roll(x, [-1, 1])
+        # shifts sum to 0 on the flattened array
+        assert_equal(y, x)
+
+        with pytest.warns(np.exceptions.VisibleDeprecationWarning,
+                          match=warn_msg):
+            z = np.roll(x, [1, 2, -3])
+        assert_equal(z, x)
+
+        with pytest.warns(np.exceptions.VisibleDeprecationWarning,
+                          match=warn_msg):
+            w = np.roll(x, [-1, 1], 0)
+        # both shifts applied to axis 0 (-1 + 1 == 0)
+        assert_equal(w, x)
+
+        with pytest.warns(np.exceptions.VisibleDeprecationWarning,
+                          match=warn_msg):
+            u = np.roll(x, (1, 2), (0,))
+        assert_equal(u, np.roll(x, 3, 0))
+
+        # Matching axis sequence remains supported and is the replacement.
+        assert_equal(np.roll(x, [-1, 1], (0, 1)), expected)
+
+        # Size-1 shift sequences still behave like a scalar shift.
+        assert_equal(np.roll(x, [1]), np.roll(x, 1))
+        assert_equal(np.roll(x, (1,), 0), np.roll(x, 1, 0))
+
 
 class TestRollaxis:
 
