@@ -664,16 +664,24 @@ PyArray_Round(PyArrayObject *a, int decimals, PyArrayObject *out)
     }
     if (!out) {
         if (PyArray_ISINTEGER(a)) {
+            /*
+             * Scale via float64, then cast back.  Use NewLikeArray so ndarray
+             * subclasses are preserved through the temporary and final cast
+             * (gh-3540).
+             */
             ret_int = 1;
             my_descr = PyArray_DescrFromType(NPY_DOUBLE);
+            if (my_descr == NULL) {
+                return NULL;
+            }
         }
         else {
+            /* Keep input dtype; NewLikeArray steals this reference. */
             Py_INCREF(PyArray_DESCR(a));
             my_descr = PyArray_DESCR(a);
         }
-        out = (PyArrayObject *)PyArray_Empty(PyArray_NDIM(a), PyArray_DIMS(a),
-                                             my_descr,
-                                             PyArray_ISFORTRAN(a));
+        out = (PyArrayObject *)PyArray_NewLikeArray(
+                a, NPY_KEEPORDER, my_descr, 1);
         if (out == NULL) {
             return NULL;
         }

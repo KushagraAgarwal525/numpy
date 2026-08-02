@@ -2252,6 +2252,20 @@ class TestMethods:
         assert a.flags.f_contiguous
         assert np.round(a).flags.f_contiguous
 
+    @pytest.mark.parametrize('decimals', [0, 1, -1])
+    @pytest.mark.parametrize('dtype', [int, float, complex])
+    def test_round_preserves_subclass(self, decimals, dtype):
+        # gh-3540: round must return the same ndarray subclass as the input
+        class ArraySubclass(np.ndarray):
+            pass
+
+        a = np.arange(4, dtype=dtype).view(ArraySubclass)
+        if dtype is complex:
+            a = (a + 1j * a).view(ArraySubclass)
+        rounded = a.round(decimals=decimals)
+        assert type(rounded) is ArraySubclass
+        assert_equal(rounded, np.asarray(a).round(decimals=decimals))
+
     def test_squeeze(self):
         a = np.array([[[1], [2], [3]]])
         assert_equal(a.squeeze(), [1, 2, 3])
