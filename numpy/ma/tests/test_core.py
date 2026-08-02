@@ -5875,7 +5875,9 @@ def test_ma_ufunc_returns_out():
     x = array([1., 2., 3.], mask=[0, 0, 1])
     y = np.ma.add(x, 1., out=x)
     assert_(y is x)
-    assert_equal(x.data, [2., 3., 3.])
+    # When out aliases an input, masked positions keep the ufunc result
+    # (same as np.add on MaskedArray); the mask is still preserved.
+    assert_equal(x.data, [2., 3., 4.])
     assert_equal(x.mask, [False, False, True])
 
     out = array([0., 0., 0.], mask=[0, 0, 0])
