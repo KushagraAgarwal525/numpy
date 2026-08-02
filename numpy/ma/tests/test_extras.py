@@ -7,6 +7,7 @@ Adapted from the original test_ma by Pierre Gerard-Marchant
 """
 import inspect
 import itertools
+import warnings
 
 import pytest
 
