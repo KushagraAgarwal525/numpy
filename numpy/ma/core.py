@@ -983,6 +983,7 @@ class _MaskedUnaryOperation(_MaskedUFunc):
 
         """
         d = getdata(a)
+        input_mask = getmask(a)
         out = kwargs.get('out')
         # Preserve input values when ``out`` may overwrite ``d`` (gh-4065).
         d_orig = np.array(d, copy=True) if out is not None else d
@@ -1002,13 +1003,15 @@ class _MaskedUnaryOperation(_MaskedUFunc):
             # ``out`` was passed through to the ufunc).
             m = ~umath.isfinite(getdata(result))
             m |= domain_mask
-            m |= getmask(a)
+            # Use the pre-ufunc mask: calling the ufunc with ``getdata(a)``
+            # means ``__array_wrap__`` may not see the original mask.
+            m |= input_mask
         else:
             # Case 1.2. : Function without a domain
             # Get the result and the mask
             with np.errstate(divide='ignore', invalid='ignore'):
                 result = self.f(d, *args, **kwargs)
-            m = getmask(a)
+            m = input_mask
 
         if not getattr(result, 'ndim', 0):
             # Case 2.1. : The result is scalarscalar
@@ -1224,6 +1227,7 @@ class _DomainedBinaryOperation(_MaskedUFunc):
         "Execute the call behavior."
         # Get the data
         (da, db) = (getdata(a), getdata(b))
+        input_mask = mask_or(getmask(a), getmask(b))
         out = kwargs.get('out')
         # Preserve first input when ``out`` may overwrite it (gh-4065).
         da_orig = np.array(da, copy=True) if out is not None else da
@@ -1236,8 +1240,7 @@ class _DomainedBinaryOperation(_MaskedUFunc):
             result = self.f(da, db, *args, **kwargs)
         # Get the mask as a combination of the source masks and invalid
         m = ~umath.isfinite(getdata(result))
-        m |= getmask(a)
-        m |= getmask(b)
+        m |= input_mask
         m |= domain_mask
         # Take care of the scalar case first
         if not getattr(result, 'ndim', 0):
@@ -3210,12 +3213,20 @@ class MaskedArray(ndarray):
                             except Exception:
                                 pass
                     if overlaps_out:
-                        d = (~umath.isfinite(result)).astype(bool, copy=False)
+                        # Non-finite results stand in for an input domain
+                        # check when inputs were overwritten. Object dtypes
+                        # and other non-numeric results cannot use isfinite.
+                        try:
+                            d = (~umath.isfinite(getdata(result))).astype(
+                                bool, copy=False)
+                            d = filled(d, True)
+                        except (TypeError, ValueError):
+                            d = False
                     else:
                         d = domain(*input_args).astype(bool, copy=False)
-                    d = filled(d, True)
+                        d = filled(d, True)
 
-                if d.any():
+                if d is not False and np.any(d):
                     # Fill the result where the domain is wrong
                     try:
                         # Binary domain: take the last value
