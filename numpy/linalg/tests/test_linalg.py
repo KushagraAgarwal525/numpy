@@ -1710,6 +1710,17 @@ class TestMatrixRank:
         ):
             matrix_rank(I, tol=0.01, rtol=0.01)
 
+        # tol/rtol must apply to 1-D vectors the same as to a row matrix
+        # (gh-7906)
+        v = np.array([0., 0., 1.e-14])
+        assert_equal(matrix_rank(v), 1)
+        assert_equal(matrix_rank(v, tol=1e-13), 0)
+        assert_equal(matrix_rank(v[np.newaxis], tol=1e-13), 0)
+        assert_equal(matrix_rank(v, rtol=1e3), 0)
+        assert_equal(matrix_rank(np.zeros(3), tol=1e-13), 0)
+        assert_equal(matrix_rank(np.array(1.e-14), tol=1e-13), 0)
+        assert_equal(matrix_rank(np.array(1.), tol=1e-13), 1)
+
     def test_symmetric_rank(self):
         assert_equal(4, matrix_rank(np.eye(4), hermitian=True))
         assert_equal(1, matrix_rank(np.ones((4, 4)), hermitian=True))

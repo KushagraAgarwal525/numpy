@@ -1,0 +1,8 @@
+`matrix_rank` honors ``tol``/``rtol`` for 1-D inputs
+----------------------------------------------------
+
+`numpy.linalg.matrix_rank` previously ignored ``tol`` and ``rtol`` for
+vectors and scalars, always returning 0 or 1 based only on whether every
+element was zero.  When a tolerance is supplied, 1-D inputs are now treated
+as a row matrix so the threshold matches an explicit 2-D row of the same
+values.
