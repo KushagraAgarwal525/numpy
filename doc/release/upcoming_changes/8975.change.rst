@@ -1,0 +1,7 @@
+``np.fmin`` / ``np.fmax`` ignore NaNs on object arrays
+-----------------------------------------------------
+
+``np.fmin`` and ``np.fmax`` on ``dtype=object`` arrays previously used the
+same comparison helpers as ``np.minimum`` / ``np.maximum``, so NaNs were
+propagated. They now skip NaN-like values (``value != value``), matching
+the floating-point loops.

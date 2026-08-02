@@ -78,6 +78,50 @@ npy_Object@Kind@(PyObject *i1, PyObject *i2)
 }
 /**end repeat**/
 
+/*
+ * NaN-like check for object arrays: treat values that compare unequal to
+ * themselves (value != value) as NaN. Matches float/complex NaN semantics
+ * and seberg's suggested definition for object isnan (gh-28602 / gh-8975).
+ */
+static int
+npy_ObjectIsNan(PyObject *obj)
+{
+    return PyObject_RichCompareBool(obj, obj, Py_NE);
+}
+
+/*
+ * Object analogues of fmax/fmin: prefer non-NaN operands, otherwise fall
+ * back to npy_ObjectMax / npy_ObjectMin (gh-8975).
+ */
+/**begin repeat
+ * #Kind = Max, Min#
+ * #OP = FMax, FMin#
+ */
+static PyObject *
+npy_Object@OP@(PyObject *i1, PyObject *i2)
+{
+    int isnan1, isnan2;
+
+    isnan1 = npy_ObjectIsNan(i1);
+    if (isnan1 < 0) {
+        return NULL;
+    }
+    if (isnan1) {
+        Py_INCREF(i2);
+        return i2;
+    }
+    isnan2 = npy_ObjectIsNan(i2);
+    if (isnan2 < 0) {
+        return NULL;
+    }
+    if (isnan2) {
+        Py_INCREF(i1);
+        return i1;
+    }
+    return npy_Object@Kind@(i1, i2);
+}
+/**end repeat**/
+
 /* Emulates Python's 'a or b' behavior */
 static PyObject *
 npy_ObjectLogicalOr(PyObject *i1, PyObject *i2)

@@ -2761,8 +2761,18 @@ class TestFmax(_FilterInvalids):
                 assert_equal(np.fmax([v1], [v2]), [expected])
                 assert_equal(np.fmax.reduce([v1, v2]), expected)
 
-
-class TestFmin(_FilterInvalids):
+    def test_object_nans(self):
+        # gh-8975: object fmax must ignore NaNs like the float loops
+        nan = float('nan')
+        arg1 = np.array([0, nan, nan], dtype=object)
+        arg2 = np.array([nan, 0, nan], dtype=object)
+        out = np.array([0, 0, nan], dtype=object)
+        assert_equal(np.fmax(arg1, arg2), out)
+        assert_equal(np.fmax.reduce(np.array([1, nan], dtype=object)), 1)
+        assert_equal(np.fmax.reduce(np.array([nan, 1], dtype=object)), 1)
+        assert_equal(np.fmax.reduce(np.array([1.0, nan], dtype=object)), 1.0)
+        # still prefer the larger finite value
+        assert_equal(np.fmax.reduce(np.array([1, 2, nan], dtype=object)), 2)
     def test_reduce(self):
         dflt = np.typecodes['AllFloat']
         dint = np.typecodes['AllInteger']
@@ -2824,8 +2834,20 @@ class TestFmin(_FilterInvalids):
                 assert_equal(np.fmin([v1], [v2]), [expected])
                 assert_equal(np.fmin.reduce([v1, v2]), expected)
 
-
-class TestBool:
+    def test_object_nans(self):
+        # gh-8975: object fmin must ignore NaNs like the float loops
+        nan = float('nan')
+        arg1 = np.array([0, nan, nan], dtype=object)
+        arg2 = np.array([nan, 0, nan], dtype=object)
+        out = np.array([0, 0, nan], dtype=object)
+        assert_equal(np.fmin(arg1, arg2), out)
+        assert_equal(np.fmin.reduce(np.array([1, nan], dtype=object)), 1)
+        assert_equal(np.fmin.reduce(np.array([nan, 1], dtype=object)), 1)
+        assert_equal(np.fmin.reduce(np.array([1.0, nan], dtype=object)), 1.0)
+        # still prefer the smaller finite value
+        assert_equal(np.fmin.reduce(np.array([2, 1, nan], dtype=object)), 1)
+        # minimum on object continues to propagate NaNs
+        assert_equal(np.minimum.reduce(np.array([1, nan], dtype=object)), nan)
     def test_exceptions(self):
         a = np.ones(1, dtype=np.bool)
         assert_raises(TypeError, np.negative, a)
