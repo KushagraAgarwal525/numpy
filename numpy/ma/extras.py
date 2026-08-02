@@ -46,6 +46,7 @@ from .core import (  # noqa: F401
     getmask,
     getmaskarray,
     make_mask_descr,
+    make_mask_none,
     mask_or,
     masked,
     masked_array,
@@ -811,14 +812,45 @@ def _median(a, axis=None, out=None, overwrite_input=False):
         indexer = tuple(indexer)
         return np.ma.mean(asorted[indexer], axis=axis, out=out)
 
+    def _sum_div2(values, axis, out):
+        # Average without going through ma.mean, which masks non-finite results
+        # (inf / 2 would become masked). Promote float16 to float32 for the
+        # sum like np.mean, so large finite float16 values do not overflow
+        # (gh-22688).
+        orig_dtype = values.dtype
+        sum_dtype = None
+        if orig_dtype == np.dtype(np.float16):
+            sum_dtype = np.dtype(np.float32)
+
+        if sum_dtype is not None:
+            s = np.ma.sum(values, axis=axis, dtype=sum_dtype)
+            np.true_divide(s.data, 2., casting='unsafe', out=s.data)
+            s = s.astype(orig_dtype)
+            if out is not None:
+                out.flat = s
+                if isinstance(out, MaskedArray):
+                    outmask = getmask(out)
+                    if outmask is nomask:
+                        outmask = out._mask = make_mask_none(out.shape)
+                    outmask.flat = getmaskarray(s)
+                return out
+            return s
+
+        s = np.ma.sum(values, axis=axis, out=out)
+        np.true_divide(s.data, 2., casting='unsafe', out=s.data)
+        return s
+
     if asorted.ndim == 1:
         idx, odd = divmod(count(asorted), 2)
         mid = asorted[idx + odd - 1:idx + 1]
         if np.issubdtype(asorted.dtype, np.inexact) and asorted.size > 0:
             # avoid inf / x = masked
-            s = mid.sum(out=out)
-            if not odd:
-                s = np.true_divide(s, 2., casting='safe', out=out)
+            if asorted.dtype == np.dtype(np.float16) and not odd:
+                s = _sum_div2(mid, axis=0, out=out)
+            else:
+                s = mid.sum(out=out)
+                if not odd:
+                    s = np.true_divide(s, 2., casting='safe', out=out)
             s = np.lib._utils_impl._median_nancheck(asorted, s, axis)
         else:
             s = mid.mean(out=out)
@@ -856,9 +888,7 @@ def _median(a, axis=None, out=None, overwrite_input=False):
 
     if np.issubdtype(asorted.dtype, np.inexact):
         # avoid inf / x = masked
-        s = np.ma.sum(low_high, axis=axis, out=out)
-        np.true_divide(s.data, 2., casting='unsafe', out=s.data)
-
+        s = _sum_div2(low_high, axis=axis, out=out)
         s = np.lib._utils_impl._median_nancheck(asorted, s, axis)
     else:
         s = np.ma.mean(low_high, axis=axis, out=out)

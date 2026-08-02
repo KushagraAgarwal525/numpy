@@ -1048,6 +1048,30 @@ class TestNanFunctions_Median:
                         assert_equal(np.nanmedian(a, axis=0),
                                      ([np.nan] * i) + [-inf] * j)
 
+    def test_float16_no_overflow(self):
+        # gh-22688: even-length float16 medians near finfo.max overflowed
+        # when nanmedian used the masked-array small-axis path.
+        a = np.array([[1, 1e4, 4e4],
+                      [1, 1e4, 4e4]], dtype=np.float16)
+        with warnings.catch_warnings(record=True) as w:
+            warnings.simplefilter('always')
+            result = np.nanmedian(a, axis=0)
+        assert_equal(result, np.array([1, 1e4, 4e4], dtype=np.float16))
+        assert_equal(result.dtype, np.dtype(np.float16))
+        assert_(not any("overflow" in str(wi.message) for wi in w))
+
+        # Odd length along axis also averaged a duplicated middle value.
+        a = np.array([[4e4]], dtype=np.float16)
+        assert_equal(np.nanmedian(a, axis=0),
+                     np.array([4e4], dtype=np.float16))
+
+        out = np.empty(3, dtype=np.float16)
+        result = np.nanmedian(
+            np.array([[1, 1e4, 4e4], [1, 1e4, 4e4]], dtype=np.float16),
+            axis=0, out=out)
+        assert_(result is out)
+        assert_equal(out, np.array([1, 1e4, 4e4], dtype=np.float16))
+
 
 class TestNanFunctions_Percentile:
 
