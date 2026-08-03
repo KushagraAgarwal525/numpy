@@ -1,0 +1,7 @@
+``eigh`` / ``eigvalsh`` reject LAPACK workspace integer overflow
+-----------------------------------------------------------------
+On LP64 LAPACK builds, computing the ``syevd``/``heevd`` workspace size
+``1 + 6*n + 2*n*n`` overflows a 32-bit integer for ``n >= 32767``.  NumPy now
+checks the documented minima in 64-bit arithmetic before allocating and raises
+``ValueError`` instead of hanging or reporting a misleading
+``LinAlgError: Eigenvalues did not converge``.

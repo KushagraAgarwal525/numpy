@@ -23,6 +23,7 @@
 #include <cassert>
 #include <cmath>
 #include <cstring>
+#include <limits>
 #include <type_traits>
 #include <utility>
 
@@ -466,6 +467,39 @@ report_no_memory()
     NPY_ALLOW_C_API;
     PyErr_NoMemory();
     NPY_DISABLE_C_API;
+}
+
+/*
+ * LAPACK workspace expressions such as 1+6*n+2*n*n are evaluated in
+ * fortran_int arithmetic inside LAPACK.  On LP64 builds that overflows for
+ * modest n (e.g. syevd JOBZ='V' at n >= 32767), and the workspace query then
+ * returns a silently truncated size.  Check documented minima in npy_int64
+ * before allocating and reject sizes that cannot be represented.
+ */
+static inline void
+report_lapack_int_overflow(const char *what, npy_int64 value)
+{
+    NPY_ALLOW_C_API_DEF
+    NPY_ALLOW_C_API;
+    PyErr_Format(PyExc_ValueError,
+        "LAPACK %s size (%lld) exceeds the maximum value of a LAPACK integer "
+        "(%lld). Try building NumPy against an ILP64 LAPACK library "
+        "(for example OpenBLAS with USE_64BITINT=1).",
+        what,
+        (long long)value,
+        (long long)std::numeric_limits<fortran_int>::max());
+    NPY_DISABLE_C_API;
+}
+
+static inline int
+lapack_int_check(const char *what, npy_int64 value)
+{
+    if (value < 0 ||
+            value > (npy_int64)std::numeric_limits<fortran_int>::max()) {
+        report_lapack_int_overflow(what, value);
+        return 0;
+    }
+    return 1;
 }
 
 /*
@@ -1341,6 +1375,27 @@ init_evd(EIGH_PARAMS_t<typ>* params, char JOBZ, char UPLO,
     size_t safe_N = N;
     size_t alloc_size = safe_N * (safe_N + 1) * sizeof(typ);
     fortran_int lda = fortran_int_max(N, 1);
+    npy_int64 n64 = (npy_int64)N;
+    npy_int64 min_lwork;
+    npy_int64 min_liwork;
+
+    /* Documented DSYEVD/SSYEVD workspace minima (Netlib LAPACK). */
+    if (N <= 1) {
+        min_lwork = 1;
+        min_liwork = 1;
+    }
+    else if (JOBZ == 'V') {
+        min_lwork = 1 + 6 * n64 + 2 * n64 * n64;
+        min_liwork = 3 + 5 * n64;
+    }
+    else {
+        min_lwork = 2 * n64 + 1;
+        min_liwork = 1;
+    }
+    if (!lapack_int_check("syevd lwork", min_lwork) ||
+            !lapack_int_check("syevd liwork", min_liwork)) {
+        goto error;
+    }
 
     mem_buff = (npy_uint8 *)PyMem_RawMalloc(alloc_size);
 
@@ -1363,6 +1418,8 @@ init_evd(EIGH_PARAMS_t<typ>* params, char JOBZ, char UPLO,
     {
         typ query_work_size;
         fortran_int query_iwork_size;
+        npy_int64 query_lwork;
+        npy_int64 query_liwork;
 
         params->LWORK = -1;
         params->LIWORK = -1;
@@ -1373,8 +1430,19 @@ init_evd(EIGH_PARAMS_t<typ>* params, char JOBZ, char UPLO,
             goto error;
         }
 
-        lwork = (fortran_int)query_work_size;
-        liwork = query_iwork_size;
+        query_lwork = (npy_int64)query_work_size;
+        query_liwork = (npy_int64)query_iwork_size;
+        /* Catch LAPACK-internal int overflow that returns a too-small size. */
+        if (query_lwork < min_lwork || query_liwork < min_liwork) {
+            report_lapack_int_overflow("syevd lwork", min_lwork);
+            goto error;
+        }
+        if (!lapack_int_check("syevd lwork", query_lwork) ||
+                !lapack_int_check("syevd liwork", query_liwork)) {
+            goto error;
+        }
+        lwork = (fortran_int)query_lwork;
+        liwork = (fortran_int)query_liwork;
     }
 
     mem_buff2 = (npy_uint8 *)PyMem_RawMalloc(lwork*sizeof(typ) + liwork*sizeof(fortran_int));
@@ -1453,6 +1521,32 @@ using fbasetyp = fortran_type_t<basetyp>;
     npy_uint8 *a, *w, *work, *rwork, *iwork;
     size_t safe_N = N;
     fortran_int lda = fortran_int_max(N, 1);
+    npy_int64 n64 = (npy_int64)N;
+    npy_int64 min_lwork;
+    npy_int64 min_lrwork;
+    npy_int64 min_liwork;
+
+    /* Documented ZHEEVD/CHEEVD workspace minima (Netlib LAPACK). */
+    if (N <= 1) {
+        min_lwork = 1;
+        min_lrwork = 1;
+        min_liwork = 1;
+    }
+    else if (JOBZ == 'V') {
+        min_lwork = 2 * n64 + n64 * n64;
+        min_lrwork = 1 + 5 * n64 + 2 * n64 * n64;
+        min_liwork = 3 + 5 * n64;
+    }
+    else {
+        min_lwork = n64 + 1;
+        min_lrwork = n64;
+        min_liwork = 1;
+    }
+    if (!lapack_int_check("heevd lwork", min_lwork) ||
+            !lapack_int_check("heevd lrwork", min_lrwork) ||
+            !lapack_int_check("heevd liwork", min_liwork)) {
+        goto error;
+    }
 
     mem_buff = (npy_uint8 *)PyMem_RawMalloc(safe_N * safe_N * sizeof(typ) +
                       safe_N * sizeof(basetyp));
@@ -1474,6 +1568,9 @@ using fbasetyp = fortran_type_t<basetyp>;
         ftyp query_work_size;
         fbasetyp query_rwork_size;
         fortran_int query_iwork_size;
+        npy_int64 query_lwork;
+        npy_int64 query_lrwork;
+        npy_int64 query_liwork;
 
         params->LWORK = -1;
         params->LRWORK = -1;
@@ -1486,9 +1583,22 @@ using fbasetyp = fortran_type_t<basetyp>;
             goto error;
         }
 
-        lwork = (fortran_int)*(fbasetyp*)&query_work_size;
-        lrwork = (fortran_int)query_rwork_size;
-        liwork = query_iwork_size;
+        query_lwork = (npy_int64)*(fbasetyp*)&query_work_size;
+        query_lrwork = (npy_int64)query_rwork_size;
+        query_liwork = (npy_int64)query_iwork_size;
+        if (query_lwork < min_lwork || query_lrwork < min_lrwork ||
+                query_liwork < min_liwork) {
+            report_lapack_int_overflow("heevd lrwork", min_lrwork);
+            goto error;
+        }
+        if (!lapack_int_check("heevd lwork", query_lwork) ||
+                !lapack_int_check("heevd lrwork", query_lrwork) ||
+                !lapack_int_check("heevd liwork", query_liwork)) {
+            goto error;
+        }
+        lwork = (fortran_int)query_lwork;
+        lrwork = (fortran_int)query_lrwork;
+        liwork = (fortran_int)query_liwork;
     }
 
     mem_buff2 = (npy_uint8 *)PyMem_RawMalloc(lwork*sizeof(typ) +
