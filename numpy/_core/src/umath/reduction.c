@@ -303,8 +303,29 @@ PyUFunc_ReduceWrapper(PyArrayMethod_Context *context,
         op_axes[i] = result_axes;
     }
     op_axes[nout] = operand_axes;
-    /* Wheremask must follow the same axis permutation as the operand. */
-    op_axes[nout + 1] = (wheremask != NULL) ? operand_axes : NULL;
+    /*
+     * Remap the where mask with the same iterator permutation.  A shorter
+     * where broadcasts from the right onto the operand, so map each
+     * (permuted) operand axis to the corresponding where axis or -1.
+     */
+    int where_axes[NPY_MAXDIMS];
+    if (wheremask != NULL) {
+        int w_ndim = PyArray_NDIM(wheremask);
+        for (int i = 0; i < ndim; i++) {
+            int od = operand_axes[i];
+            int where_axis = od - (ndim - w_ndim);
+            if (where_axis >= 0) {
+                where_axes[i] = where_axis;
+            }
+            else {
+                where_axes[i] = -1;
+            }
+        }
+        op_axes[nout + 1] = where_axes;
+    }
+    else {
+        op_axes[nout + 1] = NULL;
+    }
 
     int expected_out_ndim = keepdims ? ndim : n_outer;
     for (int i = 0; i < nout; i++) {
