@@ -32,6 +32,34 @@ This fork is configured for Cursor Cloud Agents via `.cursor/environment.json`.
 
 ### Issue tracking
 - Read/update `.cursor/issue-state.json` (`completed` / `attempted` / `skipped`) so later runs do not repeat work.
+- Also treat existing fork PR titles mentioning `gh-<n>` as completed/claimed.
+
+### Issue selection (hard gate — BEFORE any code changes)
+Recent runs over-indexed on small, old `numpy.ma` edge cases. That is **not** acceptable.
+
+**Prefer (high priority):**
+- `numpy/_core` C/Cython, dtype/ufunc/casting, NDArray protocol, SIMD, linalg, FFT, random
+- Correctness bugs with wide impact or many reactions/comments
+- Nontrivial API consistency across dtypes / array-likes
+- Issues where a real fix needs design + substantial tests
+
+**Reject / skip immediately (record in `issue-state.json` → `skipped`):**
+- Docs, typos, wording-only, comment cleanup
+- One-line or ~5–15 minute Python tweaks
+- Tiny single-method `numpy.ma` patches (fill_value / flags / copy edge cases) unless they clearly require deep C/`_core` work
+- Pure “good first issue” unless also high-impact and technically deep
+- RFCs / design debates with no agreed fix
+- Hardware / platform you cannot run in this environment
+
+**Minimum complexity bar:**
+The chosen issue’s honest fix must require at least one of:
+1. C or Cython changes, or
+2. Multi-file / cross-module design, or
+3. Nontrivial algorithm or public-API work with substantial new tests
+
+If the smallest correct fix is a small Python one-liner, **skip and pick another**. Prefer **zero PRs** over a trivial PR.
+
+**Selection memo (required):** Before editing, write issue number, why it is meaningful, and expected complexity. Then implement.
 
 ### Contribution rules
 - One upstream `numpy/numpy` issue per run.
