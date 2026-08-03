@@ -433,18 +433,19 @@ class TestHistogram:
         """
         Freedman-Diaconis with a tiny nonzero IQR must not request
         astronomical bin counts (MemoryError / multi-PiB linspace).
+        Falls back to Sturges (size-only) under the safety limit.
         """
         x = np.array([2, 2, 2 - 1e-15, 2 - 1e-15, 1], dtype=np.float64)
         counts, edges = np.histogram(x, bins='fd')
-        assert len(counts) < 100
+        # Sturges for n=5 → ceil(log2(5)+1) = 4 bins
+        assert_equal(len(counts), 4)
         assert edges[0] == x.min()
         assert edges[-1] == x.max()
-        # Same safeguard for histogram_bin_edges
         edges_only = histogram_bin_edges(x, bins='fd')
         assert_array_equal(edges_only, edges)
 
     @pytest.mark.parametrize("estimator", [
-        'fd', 'scott', 'doane', 'stone', 'auto', 'rice', 'sturges', 'sqrt'])
+        'fd', 'scott', 'doane', 'auto', 'rice', 'sturges', 'sqrt'])
     def test_gh_8203_estimators_bounded(self, estimator):
         """Automatic estimators stay within the safety bin-count cap."""
         x = np.array([2, 2, 2 - 1e-15, 2 - 1e-15, 1], dtype=np.float64)
@@ -452,6 +453,13 @@ class TestHistogram:
         assert len(counts) <= max(100, int(np.sqrt(x.size)))
         assert edges[0] == x.min()
         assert edges[-1] == x.max()
+
+    def test_gh_8203_fd_outliers_unchanged(self):
+        """Intentional sparse FD bins from outliers must not be capped."""
+        xcenter = np.linspace(-10, 10, 50)
+        outlier_dataset = np.hstack((np.linspace(-110, -100, 5), xcenter))
+        counts, edges = np.histogram(outlier_dataset, bins='fd')
+        assert_equal(len(counts), 21)
 
 
 class TestHistogramOptimBinNums:

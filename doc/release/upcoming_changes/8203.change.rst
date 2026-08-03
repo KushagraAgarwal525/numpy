@@ -1,8 +1,9 @@
-``histogram`` Freedman-Diaconis estimator no longer OOMs on tiny IQR
---------------------------------------------------------------------
-``numpy.histogram`` and ``numpy.histogram_bin_edges`` with ``bins='fd'``
-no longer attempt to allocate astronomical numbers of bins when the
-interquartile range is a tiny nonzero value (for example from
-floating-point noise). The FD width is floored using the same
-square-root heuristic as ``bins='auto'``, and all automatic estimators
-are subject to a size-based safety cap on the bin count.
+``histogram`` automatic bin estimators no longer OOM on tiny widths
+-------------------------------------------------------------------
+``numpy.histogram`` and ``numpy.histogram_bin_edges`` with automatic
+string estimators such as ``bins='fd'`` no longer attempt to allocate
+astronomical numbers of bins when a variance-based width estimate is a
+tiny nonzero value (for example from floating-point noise). When the
+estimated bin count exceeds a size-based safety limit (never tighter
+than the square-root, Rice, Stone, or 10× Sturges bounds), the
+estimator falls back to Sturges before edges are materialized.
