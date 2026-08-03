@@ -5660,6 +5660,29 @@ class TestMaskedConstant:
         pytest.warns(UserWarning, operator.setitem, a_f, (), np.ma.masked)
         assert_(np.isnan(a_f[()]))
 
+    @pytest.mark.parametrize(
+        "dtype",
+        [np.float16, np.float32, np.float64, np.longdouble],
+    )
+    def test_float_dtype_cast_of_masked(self, dtype):
+        # gh-9760: casting masked to float16/32/longdouble used to return 0
+        # instead of nan. float64 already went through __float__.
+        with pytest.warns(UserWarning, match="converting a masked element"):
+            result = dtype(np.ma.masked)
+        assert_(type(result) is dtype)
+        assert_(np.isnan(result))
+
+    @pytest.mark.parametrize(
+        "dtype",
+        [np.float16, np.float32, np.float64, np.longdouble],
+    )
+    def test_float_dtype_cast_of_masked_0d(self, dtype):
+        # Same path for a 0-d fully masked array (not only the singleton).
+        with pytest.warns(UserWarning, match="converting a masked element"):
+            result = dtype(np.ma.array(1.5, mask=True))
+        assert_(type(result) is dtype)
+        assert_(np.isnan(result))
+
     @pytest.mark.xfail(reason="See gh-9750")
     def test_coercion_unicode(self):
         a_u = np.zeros((), 'U10')
