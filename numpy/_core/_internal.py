@@ -648,18 +648,27 @@ def __dtype_from_pep3118(stream, is_subdtype):
         if stream.consume('}'):
             break
 
-        # Sub-arrays (1)
-        shape = None
-        if stream.consume('('):
-            shape = stream.consume_until(')')
-            shape = tuple(map(int, shape.split(',')))
+        # Prefixed modifiers may appear in any order and may repeat
+        # (e.g. "<(3)i", "(2)(3)i", "(2)<(3)i").  See gh-9049.
+        # shapes are collected outer-first as they appear in the string.
+        shapes = []
+        while stream:
+            if stream.consume('('):
+                shape = stream.consume_until(')')
+                if shape:
+                    shapes.append(tuple(map(int, shape.split(','))))
+                else:
+                    shapes.append(())
+                continue
 
-        # Byte order
-        if stream.next in ('@', '=', '<', '>', '^', '!'):
-            byteorder = stream.advance(1)
-            if byteorder == '!':
-                byteorder = '>'
-            stream.byteorder = byteorder
+            if stream.next in ('@', '=', '<', '>', '^', '!'):
+                byteorder = stream.advance(1)
+                if byteorder == '!':
+                    byteorder = '>'
+                stream.byteorder = byteorder
+                continue
+
+            break
 
         # Byte order characters also control native vs. standard type sizes
         if stream.byteorder in ('@', '^'):
@@ -669,7 +678,7 @@ def __dtype_from_pep3118(stream, is_subdtype):
             type_map = _pep3118_standard_map
             type_map_chars = _pep3118_standard_typechars
 
-        # Item sizes
+        # Item sizes (repeat count) immediately before the type char
         itemsize_str = stream.consume_until(lambda c: not c.isdigit())
         if itemsize_str:
             itemsize = int(itemsize_str)
@@ -713,6 +722,10 @@ def __dtype_from_pep3118(stream, is_subdtype):
         # implies that the start of the array is *already* aligned.
         #
         extra_offset = 0
+        shape_nelem = 1
+        for shape in shapes:
+            shape_nelem *= _prod(shape)
+
         if stream.byteorder == '@':
             start_padding = (-offset) % align
             intra_padding = (-value.itemsize) % align
@@ -720,7 +733,7 @@ def __dtype_from_pep3118(stream, is_subdtype):
             offset += start_padding
 
             if intra_padding != 0:
-                if itemsize > 1 or (shape is not None and _prod(shape) > 1):
+                if itemsize > 1 or shape_nelem > 1:
                     # Inject internal padding to the end of the sub-item
                     value = _add_trailing_padding(value, intra_padding)
                 else:
@@ -735,8 +748,8 @@ def __dtype_from_pep3118(stream, is_subdtype):
         if itemsize != 1:
             value = dtype((value, (itemsize,)))
 
-        # Sub-arrays (2)
-        if shape is not None:
+        # Apply shapes from the inside out (rightmost shape is innermost)
+        for shape in reversed(shapes):
             value = dtype((value, shape))
 
         # Field name
