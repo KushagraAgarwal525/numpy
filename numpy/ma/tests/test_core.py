@@ -569,6 +569,30 @@ class TestMaskedArray:
         xc = x.copy()
         assert_equal(xc.mask, True)
 
+    def test_copy_independent_fill_value(self):
+        # gh-7329: copy must not share the fill_value 0-d array with the
+        # source, otherwise set_fill_value on the copy mutates the original.
+        a = np.ma.masked_values(np.array([9999., 0., 1., 2.]), 9999.)
+        assert_equal(a.fill_value, 9999.)
+        b = np.ma.copy(a)
+        assert_(a._fill_value is not b._fill_value)
+        np.ma.set_fill_value(b, -1.)
+        assert_equal(b.fill_value, -1.)
+        assert_equal(a.fill_value, 9999.)
+        # Method form and other allocating _arraymethod wrappers
+        c = a.copy()
+        assert_(a._fill_value is not c._fill_value)
+        c.fill_value = -2.
+        assert_equal(a.fill_value, 9999.)
+        assert_equal(c.fill_value, -2.)
+        for other in (a.flatten(), a.repeat(2)):
+            assert_(a._fill_value is not other._fill_value)
+            other.fill_value = -3.
+            assert_equal(a.fill_value, 9999.)
+        # View-like methods may still share fill_value for propagation
+        v = a.reshape(2, 2)
+        assert_(a._fill_value is v._fill_value)
+
     def test_copy_on_python_builtins(self):
         # Tests copy works on python builtins (issue#8019)
         assert_(isMaskedArray(np.ma.copy([1, 2, 3])))
