@@ -1646,10 +1646,19 @@ gentype_richcompare(PyObject *self, PyObject *other, int cmp_op)
          * Call the comparison ufunc with the scalar so that
          * `__array_ufunc__` overrides see a scalar rather than a 0-d
          * array (gh-12142).  This matches the arithmetic scalar binop
-         * path.  Void/structured comparisons still need the array
+         * path.
+         *
+         * ndarray subclasses (notably MaskedArray) must keep the
+         * FromScalar + RichCompare path: Python then prefers the
+         * subclass's richcompare (e.g. MaskedArray.__ne__), which
+         * fills masked values.  Calling the ufunc directly would
+         * bypass that and change comparison results.
+         *
+         * Void/structured comparisons still need the array
          * richcompare special-casing in `array_richcompare`.
          */
-        if (ufunc != NULL && !PyArray_IsScalar(self, Void)) {
+        if (ufunc != NULL && !PyArray_IsScalar(self, Void) &&
+                !PyArray_Check(other_op)) {
             PyObject *res = PyArray_GenericBinaryFunction(self, other_op, ufunc);
             Py_DECREF(other_op);
             return res;

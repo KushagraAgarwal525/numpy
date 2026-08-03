@@ -1264,6 +1264,18 @@ def test_scalar_richcompare_still_works_with_arrays():
         True, True, False]
 
 
+def test_scalar_richcompare_masked_array_uses_filled_values():
+    # ndarray-subclass richcompare (MaskedArray) must still win when a
+    # NumPy scalar is on the left, so masked values are filled.
+    import numpy.ma as ma
+
+    b = ma.array([0.0, 1.0], mask=[True, False], fill_value=1.0)
+    result = np.float64(0.0) != b
+    assert isinstance(result, ma.MaskedArray)
+    assert result.data.tolist() == [True, True]
+    assert result.mask.tolist() == [True, False]
+
+
 def test_void_scalar_richcompare_unchanged():
     # Void comparisons still go through the array richcompare special path.
     v = np.void(b"ab")
