@@ -2214,9 +2214,13 @@ gentype_@name@(PyObject *self, PyObject *args, PyObject *kwds)
 /**end repeat**/
 
 /*
- * reshape must always return an ndarray, including for shape ().
- * gentype_generic_method uses PyArray_Return, which converts 0-d arrays
- * back to scalars (gh-7964).
+ * reshape must return an ndarray for shape (), matching np.reshape(int(0), ())
+ * (gh-7964). gentype_generic_method uses PyArray_Return, which converts 0-d
+ * arrays back to scalars.
+ *
+ * Exception: keep 0-d void results as np.void. MaskedArray/mvoid reshape masks
+ * with shape () and expect a void scalar; a 0-d void ndarray makes field
+ * indexing return 0-d arrays and breaks mvoid.__getitem__.
  */
 static PyObject *
 gentype_reshape(PyObject *self, PyObject *args, PyObject *kwds)
@@ -2240,6 +2244,11 @@ gentype_reshape(PyObject *self, PyObject *args, PyObject *kwds)
     }
     Py_DECREF(meth);
     Py_DECREF(arr);
+    if (ret && PyArray_Check(ret) &&
+            PyArray_TYPE((PyArrayObject *)ret) == NPY_VOID &&
+            PyArray_NDIM((PyArrayObject *)ret) == 0) {
+        return PyArray_Return((PyArrayObject *)ret);
+    }
     return ret;
 }
 
