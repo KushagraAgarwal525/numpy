@@ -189,3 +189,55 @@ class TestRegression:
         b = a + 1j * np.roll(np.flip(a), 12345)
         norm = np.linalg.norm(b)
         assert_almost_equal(norm, 46.18628948075393)
+
+    def test_eigh_lapack_int_overflow_error(self):
+        # gh-25564: on LP64 LAPACK, syevd/heevd workspace 1+6*n+2*n*n overflows
+        # int32 for n >= 32767.  Raise a clear ValueError before allocating.
+        def lapack_is_lp64():
+            try:
+                blas = np.__config__.CONFIG["Build Dependencies"]["blas"]
+            except Exception:
+                return True
+            conf = blas.get("openblas configuration") or ""
+            if "USE_64BITINT=1" in conf:
+                return False
+            if "USE_64BITINT=0" in conf:
+                return True
+            # MKL / other backends: assume LP64 unless ILP64 is obvious.
+            name = (blas.get("name") or "").lower()
+            return "ilp64" not in name and "64" not in name
+
+        if not lapack_is_lp64():
+            pytest.skip("ILP64 LAPACK — workspace fits in fortran_int")
+
+        n = 32767
+        assert 1 + 6 * n + 2 * n * n > np.iinfo(np.int32).max
+
+        # Zero-stride stand-in: never materialize an n*n buffer.
+        a = np.lib.stride_tricks.as_strided(
+            np.array([1.0]), shape=(n, n), strides=(0, 0))
+        with pytest.raises(ValueError, match="LAPACK .* exceeds"):
+            linalg.eigh(a)
+
+        # Complex eigh would allocate an n*n complex output via the gufunc
+        # before init_evd runs; feed strided outs so only the overflow guard
+        # is exercised.
+        from numpy.linalg import _umath_linalg
+        ac = np.lib.stride_tricks.as_strided(
+            np.array([1.0 + 0.0j]), shape=(n, n), strides=(0, 0))
+        w_out = np.empty(n, dtype=np.float64)
+        v_out = np.lib.stride_tricks.as_strided(
+            np.zeros(1, dtype=np.complex128), shape=(n, n), strides=(0, 0))
+        with pytest.raises(ValueError, match="LAPACK .* exceeds"):
+            _umath_linalg.eigh_lo(ac, out=(w_out, v_out), signature='D->dD')
+
+        # Ordinary sizes must still succeed after the overflow guards.
+        x = np.array([[2.0, -1.0], [-1.0, 2.0]])
+        w, v = linalg.eigh(x)
+        assert_array_almost_equal(w, [1.0, 3.0])
+        assert_array_almost_equal(abs(v), np.sqrt(0.5))
+
+        xc = np.array([[2.0, -1.0j], [1.0j, 2.0]])
+        wc, vc = linalg.eigh(xc)
+        assert_array_almost_equal(wc, [1.0, 3.0])
+        assert_array_almost_equal(abs(vc), np.sqrt(0.5))
