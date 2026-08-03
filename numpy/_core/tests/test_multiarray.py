@@ -3417,6 +3417,54 @@ class TestMethods:
         b = a.searchsorted([6, 5, 4], 'right')
         assert_equal(b, [5, 5, 5])
 
+    def test_searchsorted_object_nan_keys(self):
+        # gh-15499: NaN in object keys must not poison insertion indices of
+        # subsequent comparable keys (generic binsearch consecutive-key
+        # optimization). NaN-like keys themselves search to the end, matching
+        # float searchsorted / object sort order (object_tag).
+        bins = np.array([1, 3, 5], dtype=object)
+        keys = np.array([1, 2, 3, 4, 5, 6, 7], dtype=object)
+        keys[::2] = np.nan
+
+        assert_equal(bins.searchsorted(keys, side='left'),
+                     [3, 1, 3, 2, 3, 3, 3])
+        assert_equal(bins.searchsorted(keys, side='right'),
+                     [3, 1, 3, 2, 3, 3, 3])
+        assert_equal(bins.searchsorted(keys, side='left')[1::2],
+                     bins.searchsorted(keys[1::2], side='left'))
+        assert_equal(bins.searchsorted(keys, side='right')[1::2],
+                     bins.searchsorted(keys[1::2], side='right'))
+
+        # Common-type promotion to object (numeric haystack + object needle)
+        assert_equal(np.array([1, 3, 5]).searchsorted(keys),
+                     [3, 1, 3, 2, 3, 3, 3])
+        assert_equal(np.array([1., 3., 5.]).searchsorted(keys),
+                     [3, 1, 3, 2, 3, 3, 3])
+
+        # Mixed patterns: batch result matches per-key searches
+        for side in ('left', 'right'):
+            for pattern in (
+                [np.nan, 2, np.nan, 4, np.nan],
+                [2, np.nan, 4],
+                [4, np.nan, 2],
+                [np.nan, 4],
+                [np.nan, np.nan, 4],
+            ):
+                k = np.array(pattern, dtype=object)
+                batch = bins.searchsorted(k, side=side)
+                expected = [bins.searchsorted(np.array(v, dtype=object),
+                                              side=side)
+                            for v in pattern]
+                assert_array_equal(batch, expected,
+                                   err_msg=f'side={side!r} pattern={pattern!r}')
+
+        # sorter path uses the same generic compare
+        sorter = np.argsort(bins)
+        assert_equal(bins.searchsorted(keys, sorter=sorter),
+                     [3, 1, 3, 2, 3, 3, 3])
+        assert_equal(bins.searchsorted(keys, side='right', sorter=sorter),
+                     [3, 1, 3, 2, 3, 3, 3])
+
     def test_searchsorted_type_specific(self):
         # Test all type specific binary search functions
         types = ''.join((np.typecodes['AllInteger'], np.typecodes['AllFloat'],
