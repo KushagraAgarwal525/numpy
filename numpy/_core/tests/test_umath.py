@@ -466,6 +466,44 @@ class TestAdd:
         a['a'] = -1
         assert_equal(a['b'].sum(), 0)
 
+    @pytest.mark.parametrize(
+        "dtype, n",
+        [
+            # Exact integers end at 2**11 for float16 and 2**24 for float32;
+            # choose n past those limits so naive accumulation would stick.
+            (np.float16, 3_000),
+            (np.float32, 20_000_000),
+        ],
+    )
+    def test_reduce_noncontiguous_axis_precision(self, dtype, n):
+        # gh-8869: reductions along a non-contiguous axis must still use
+        # pairwise summation rather than repeated short elementwise adds.
+        expected = dtype.type(n)
+
+        c_order = np.ones((n, 2), dtype=dtype)
+        assert_equal(c_order.sum(axis=0), [expected, expected])
+        assert_equal(np.add.reduce(c_order, axis=0), [expected, expected])
+
+        f_order = np.asfortranarray(c_order)
+        assert_equal(f_order.sum(axis=0), [expected, expected])
+
+        # Transposed view: reduced axis is strided for F-contiguous (2, n).
+        assert_equal(c_order.T.sum(axis=1), [expected, expected])
+
+        # Contiguous reduced axis must keep working.
+        contig = np.ones((2, n), dtype=dtype)
+        assert_equal(contig.sum(axis=1), [expected, expected])
+
+    def test_mean_multi_axis_float32_precision(self):
+        # gh-8869: mean over multiple axes of a float32 array of ones must stay
+        # near 1 when the product of reduced lengths exceeds 2**24.
+        # Shape chosen so axis=(0, 1) covers >2**24 elements with modest RAM.
+        a = np.ones((2**18, 2**7, 3), dtype=np.float32)
+        out = a.mean(axis=(0, 1))
+        assert_array_equal(out, np.ones(3, dtype=np.float32))
+        assert_equal(a.mean(axis=(0, 1), keepdims=True).shape, (1, 1, 3))
+        assert_equal(a.sum(axis=(0, 1))[0], np.float32(2**25))
+
 
 class TestDivision:
     def test_division_int(self):
