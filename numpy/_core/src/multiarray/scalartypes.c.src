@@ -2174,6 +2174,11 @@ gentype_byteswap(PyObject *self, PyObject *args, PyObject *kwds)
         PyArray_Descr *descr;
         PyObject *new;
         char *newmem;
+        /*
+         * VOID/STRING/UNICODE copyswap require a non-NULL arr to read
+         * descr/itemsize (see gh-24694). Provide a minimal dummy array.
+         */
+        PyArrayObject_fields dummy_fields;
 
         descr = PyArray_DescrFromScalar(self);
         data = (void *)scalar_value(self, descr);
@@ -2183,9 +2188,15 @@ gentype_byteswap(PyObject *self, PyObject *args, PyObject *kwds)
             Py_DECREF(descr);
             return PyErr_NoMemory();
         }
-        else {
-            PyDataType_GetArrFuncs(descr)->copyswap(newmem, data, 1, NULL);
-        }
+
+        memset(&dummy_fields, 0, sizeof(dummy_fields));
+        /* NULL type marks this as a dummy stack object (see get_dummy_stack_array) */
+        Py_SET_TYPE(&dummy_fields, NULL);
+        dummy_fields.descr = descr;
+        dummy_fields.flags = NPY_ARRAY_BEHAVED;
+        PyDataType_GetArrFuncs(descr)->copyswap(
+                newmem, data, 1, (PyArrayObject *)&dummy_fields);
+
         new = PyArray_Scalar(newmem, descr, NULL);
         PyMem_Free(newmem);
         Py_DECREF(descr);

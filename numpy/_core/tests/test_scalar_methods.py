@@ -325,3 +325,43 @@ class TestSignature:
         fn_ndarray = getattr(np.ndarray, method_name)
         sig_ndarray = inspect.signature(fn_ndarray)
         assert sig_generic == sig_ndarray
+
+
+class TestScalarByteswap:
+    """gh-24694: void/string/unicode scalar byteswap must not pass NULL to copyswap."""
+
+    def test_structured_void_matches_array(self):
+        dt = np.dtype([('time', '<f8'), ('n', '<i4'), ('dims', '<i4')])
+        arr = np.array([(1.5, 7, 3)], dtype=dt)
+        scalar = arr[0]
+        assert_equal(scalar.byteswap().tobytes(), arr.byteswap()[0].tobytes())
+
+    def test_plain_void(self):
+        v = np.void(b'abcdefgh')
+        # Unstructured Vn has no multi-byte fields; byteswap is a plain copy.
+        assert_equal(v.byteswap().tobytes(), v.tobytes())
+
+    def test_void_with_subarray_field(self):
+        dt = np.dtype([('x', '<i4', (2,))])
+        arr = np.array([([1, 2],)], dtype=dt)
+        assert_equal(arr[0].byteswap().tobytes(), arr.byteswap()[0].tobytes())
+
+    def test_nested_structured_void(self):
+        dt = np.dtype([('a', [('b', '<i2'), ('c', '<i4')])])
+        arr = np.array([((1, 2),)], dtype=dt)
+        assert_equal(arr[0].byteswap().tobytes(), arr.byteswap()[0].tobytes())
+
+    def test_bytes_scalar(self):
+        arr = np.array([b'abcd'], dtype='S4')
+        # Flexible string types do not byte-swap payload bytes.
+        assert_equal(arr[0].byteswap().tobytes(), arr.byteswap()[0].tobytes())
+        assert_equal(arr[0].byteswap().tobytes(), arr[0].tobytes())
+
+    def test_unicode_scalar(self):
+        arr = np.array(['ab'], dtype='U2')
+        assert_equal(arr[0].byteswap().tobytes(), arr.byteswap()[0].tobytes())
+
+    def test_numeric_scalar_unchanged(self):
+        x = np.float64(1.5)
+        y = x.byteswap()
+        assert_equal(x, np.frombuffer(y.tobytes(), dtype=x.dtype.newbyteorder())[0])
