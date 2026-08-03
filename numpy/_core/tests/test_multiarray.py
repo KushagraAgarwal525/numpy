@@ -9215,6 +9215,27 @@ class TestPEP3118Dtype:
         self._check('i', 'i')
         self._check('i:f0:', [('f0', 'i')])
 
+    def test_byteorder_before_shape(self):
+        # gh-9049: endianness may precede shape (and may appear between
+        # nested shapes). Previously only "(3)<i" worked.
+        self._check('<(3)i', ('<i4', (3,)))
+        self._check('>(2)f', ('>f4', (2,)))
+        self._check('=(4)d', ('=f8', (4,)))
+        self._check('<(2,3)i', ('<i4', (2, 3)))
+        self._check('(2)<(3)i', (('<i4', (3,)), (2,)))
+        self._check('<(2)(3)i', (('<i4', (3,)), (2,)))
+        self._check('T{<(2)i:a:f:b:}', [('a', '<i4', (2,)), ('b', '<f4')])
+
+    def test_nested_shapes(self):
+        # gh-9049: multiple consecutive shape specs are nested subarrays.
+        # NumPy's own buffer exporter emits "T{(2)(3)i:foo:}" for this dtype.
+        self._check('(2)(3)i', (('i4', (3,)), (2,)))
+        self._check('(2)(3)<i', (('<i4', (3,)), (2,)))
+        self._check('T{(2)(3)i:foo:}', [('foo', ('i4', (3,)), (2,))])
+        self._check('T{(2)(3)<i:foo:}', [('foo', ('<i4', (3,)), (2,))])
+        # Mix of multi-dim and nested shape prefixes
+        self._check('(2,3)(4)i', (('i4', (4,)), (2, 3)))
+
 
 class TestNewBufferProtocol:
     """ Test PEP3118 buffers """
@@ -9274,6 +9295,12 @@ class TestNewBufferProtocol:
         self._check_roundtrip(x)
 
         x = np.array(([[1, 2], [3, 4]],), dtype=[('a', (int, (2, 2)))])
+        self._check_roundtrip(x)
+
+        # gh-9049: nested subarray shapes export as "(2)(3)i" and must round-trip
+        dt = np.dtype({'formats': [np.dtype((np.dtype((np.int32, (3,))), (2,)))],
+                       'names': ['foo']})
+        x = np.zeros(2, dt)
         self._check_roundtrip(x)
 
         x = np.array([1, 2, 3], dtype='>i2')
