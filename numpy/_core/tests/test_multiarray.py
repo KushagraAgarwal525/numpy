@@ -1536,8 +1536,7 @@ class TestStructured:
         assert_equal(a == b, [False, True])
         assert_equal(a != b, [True, False])
 
-        # Including with embedded subarray dtype (although subarray comparison
-        # itself may still be a bit weird and compare the raw data)
+        # Including with embedded subarray dtype
         a = np.array([(5, 42), (10, 1)], dtype=[('a', '10>f8'), ('b', '5<f8')])
         b = np.array([(5, 43), (10, 1)], dtype=[('a', '10<i8'), ('b', '5>i8')])
         assert_equal(a == b, [False, True])
@@ -2476,6 +2475,29 @@ class TestMethods:
             rand = np.random.randint(256, size=4000, dtype=np.uint8)
             arr = rand.view(dt)
             arr[::-1].sort()
+
+    def test_subarray_sort_elementwise(self):
+        # gh-10570: subarray fields must sort by element values, not raw bytes
+        values = np.array([[256, 1], [2, 257]], dtype=np.uint16)
+        expected = np.array(
+            [([2, 257],), ([256, 1],)],
+            dtype=[('f', values.dtype, (2,))],
+        )
+        for byteorder in ('<', '>'):
+            a = values.astype(values.dtype.newbyteorder(byteorder))
+            b = a.view([('f', (a.dtype, a.shape[-1]))]).reshape(a.shape[0])
+            sorted_b = np.sort(b)
+            assert_array_equal(sorted_b['f'], expected['f'].astype(a.dtype))
+            assert_array_equal(np.argsort(b), [1, 0])
+
+        # Nested subarray shape, still C-order elementwise
+        a = np.array(
+            [[[[3, 1], [0, 0]]], [[[2, 9], [0, 0]]]],
+            dtype=np.int16,
+        )
+        b = a.view([('f', (a.dtype, (2, 2)))]).reshape(2)
+        assert_array_equal(np.argsort(b), [1, 0])
+        assert_array_equal(np.sort(b)['f'][:, 0, 0], [2, 3])
 
     def test_sort_raises(self):
         # gh-9404

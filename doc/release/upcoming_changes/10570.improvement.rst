@@ -1,0 +1,6 @@
+Sorting of subarray dtypes is elementwise
+-----------------------------------------
+
+``np.sort`` and ``np.argsort`` on void dtypes with subarrays now compare
+elements in C order using the base dtype, instead of comparing raw bytes.
+Previously the order depended on platform endianness (gh-10570).
