@@ -514,7 +514,19 @@ def _check_fill_value(fill_value, ndtype):
             # that the passed fill_value is not compatible with the ndtype.
             err_msg = "Cannot convert fill_value %s to dtype %s"
             raise TypeError(err_msg % (fill_value, ndtype)) from e
-    return np.array(fill_value)
+    fill_value = np.array(fill_value)
+    # For fixed-width strings/bytes, widen the fill_value dtype to the
+    # array dtype when the natural fill (e.g. default "N/A" as <U3) is
+    # narrower.  Otherwise later in-place fill_value assignment truncates
+    # values that still fit in the array (gh-9051).  If the natural fill
+    # is already wider than ndtype (e.g. "N/A" for <U1), keep it so the
+    # attribute can still expose the full default string.
+    if (ndtype.names is None
+            and ndtype.kind in "SU"
+            and fill_value.dtype.kind == ndtype.kind
+            and fill_value.dtype.itemsize < ndtype.itemsize):
+        fill_value = np.asarray(fill_value, dtype=ndtype)
+    return fill_value
 
 
 def set_fill_value(a, fill_value):
@@ -3867,6 +3879,16 @@ class MaskedArray(ndarray):
         _fill_value = self._fill_value
         if _fill_value is None:
             # Create the attribute if it was undefined
+            self._fill_value = target
+        elif (
+            _fill_value.dtype.kind in "SU"
+            and target.dtype.kind in "SU"
+            and target.dtype.itemsize > _fill_value.dtype.itemsize
+            and np.asarray(target, dtype=_fill_value.dtype).item() != target.item()
+        ):
+            # Existing fill_value storage is too narrow to hold the new
+            # value without truncation (legacy <U3/"N/A" storage). Replace
+            # so strings that fit in self.dtype are preserved (gh-9051).
             self._fill_value = target
         else:
             # Don't overwrite the attribute, just fill it (for propagation)
