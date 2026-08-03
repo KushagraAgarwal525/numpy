@@ -534,19 +534,28 @@ cdef class BitGenerator:
     """
 
     def __init__(self, seed=None):
-        self.lock = RLock()
-        self._bitgen.state = <void *>0
         if type(self) is BitGenerator:
             raise NotImplementedError('BitGenerator is a base class and cannot be instantized')
 
+        # Resolve the seed *before* mutating instance state.  Previously
+        # ``_bitgen.state`` was cleared first; a failed re-``__init__`` (e.g.
+        # invalid seed) then left a previously valid BitGenerator with a NULL
+        # state pointer, and ``random_raw()`` would segfault (gh-28784).
+        if not isinstance(seed, ISeedSequence):
+            seed = SeedSequence(seed)
+
+        self.lock = RLock()
         self._ctypes = None
         self._cffi = None
 
         cdef const char *name = "BitGenerator"
         self.capsule = PyCapsule_New(<void *>&self._bitgen, name, NULL)
-        if not isinstance(seed, ISeedSequence):
-            seed = SeedSequence(seed)
         self._seed_seq = seed
+
+    cdef bint _is_initialized(self) noexcept nogil:
+        """Return True if subclass has installed bitgen callbacks and state."""
+        return (self._bitgen.state != NULL and
+                self._bitgen.next_raw != NULL)
 
     # Pickling support:
     def __getstate__(self):
@@ -675,10 +684,16 @@ cdef class BitGenerator:
 
         See the class docstring for the number of bits returned.
         """
+        if not self._is_initialized():
+            raise ValueError(
+                "BitGenerator is not fully initialized; cannot draw random bits")
         return random_raw(&self._bitgen, self.lock, size, output)
 
     def _benchmark(self, Py_ssize_t cnt, method='uint64'):
         """Used in tests"""
+        if not self._is_initialized():
+            raise ValueError(
+                "BitGenerator is not fully initialized; cannot benchmark")
         return benchmark(&self._bitgen, self.lock, cnt, method)
 
     @property

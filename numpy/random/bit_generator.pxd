@@ -19,6 +19,8 @@ cdef class BitGenerator():
     cdef readonly object _cffi
     cdef readonly object capsule
 
+    cdef bint _is_initialized(self) noexcept nogil
+
 
 cdef class SeedSequence():
     cdef readonly object entropy

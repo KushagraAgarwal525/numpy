@@ -202,6 +202,16 @@ cdef class Generator:
             raise ValueError("Invalid bit generator. The bit generator must "
                              "be instantiated.")
         self._bitgen = (<bitgen_t *> PyCapsule_GetPointer(capsule, name))[0]
+        # Reject BitGenerators that never installed C callbacks/state
+        # (e.g. incomplete subclasses) so Generator.random() cannot segfault.
+        if (self._bitgen.state == NULL or
+                self._bitgen.next_raw == NULL or
+                self._bitgen.next_uint64 == NULL or
+                self._bitgen.next_uint32 == NULL or
+                self._bitgen.next_double == NULL):
+            raise ValueError(
+                "BitGenerator is not fully initialized; subclasses must set "
+                "up the underlying bitgen callbacks before use")
         self.lock = bit_generator.lock
 
     def __repr__(self):
