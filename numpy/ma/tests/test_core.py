@@ -569,6 +569,28 @@ class TestMaskedArray:
         xc = x.copy()
         assert_equal(xc.mask, True)
 
+    def test_copy_clears_sharedmask(self):
+        # gh-7210: after copy the mask is independent, so sharedmask must
+        # be False even when the source view reported sharedmask True.
+        a = np.zeros((2, 3))
+        a = np.ma.masked_array(a, np.ma.getmaskarray(a))
+        b = a[...]
+        assert_(b.sharedmask)
+        b = b.copy()
+        assert_(b.mask.base is not a.mask)
+        assert_(not b.sharedmask)
+        # Direct .copy() on a MaskedArray with an explicit mask
+        x = np.ma.array([1, 2, 3], mask=[0, 1, 0])
+        y = x.copy()
+        assert_(not y.sharedmask)
+        assert_(y._mask is not x._mask)
+        # flatten/repeat also allocate; sharedmask must clear
+        assert_(not x.flatten().sharedmask)
+        assert_(not x.repeat(2).sharedmask)
+        # View-like methods keep sharedmask
+        assert_(x.T.sharedmask)
+        assert_(x.swapaxes(0, 0).sharedmask)
+
     def test_copy_on_python_builtins(self):
         # Tests copy works on python builtins (issue#8019)
         assert_(isMaskedArray(np.ma.copy([1, 2, 3])))
