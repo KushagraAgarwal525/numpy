@@ -3,7 +3,7 @@ from ._mt19937 import MT19937
 from ._pcg64 import PCG64, PCG64DXSM
 from ._philox import Philox
 from ._sfc64 import SFC64
-from .bit_generator import BitGenerator
+from .bit_generator import BitGenerator, SeedSequence
 from .mtrand import RandomState
 
 BitGenerators = {'MT19937': MT19937,
@@ -12,6 +12,19 @@ BitGenerators = {'MT19937': MT19937,
                  'Philox': Philox,
                  'SFC64': SFC64,
                  }
+
+
+def __seed_sequence_ctor(entropy=None, spawn_key=(), pool_size=4,
+                         n_children_spawned=0):
+    """
+    Pickling helper that rebuilds a SeedSequence without pickling its lock.
+    """
+    return SeedSequence(
+        entropy,
+        spawn_key=spawn_key,
+        pool_size=pool_size,
+        n_children_spawned=n_children_spawned,
+    )
 
 
 def __bit_generator_ctor(bit_generator: str | type[BitGenerator] = 'MT19937'):

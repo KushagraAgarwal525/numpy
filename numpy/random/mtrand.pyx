@@ -213,7 +213,13 @@ cdef class RandomState:
         # Generator is created.
         return __randomstate_ctor, (self._bit_generator, ), self.get_state(legacy=False)
 
-    cdef _initialize_bit_generator(self, bit_generator):
+    cdef _initialize_bit_generator(self, bit_generator, bint keep_lock=False):
+        # When keep_lock is True (set_bit_generator), force the new BitGenerator
+        # to share this RandomState's existing lock object so concurrent draws
+        # that already captured self.lock stay synchronized with the swapped
+        # bitgen state, and so Generator(get_bit_generator()) shares the lock.
+        if keep_lock:
+            bit_generator._share_lock(self.lock)
         self._bit_generator = bit_generator
         capsule = bit_generator.capsule
         cdef const char *name = "BitGenerator"
@@ -222,7 +228,8 @@ cdef class RandomState:
                              "be instantized.")
         self._bitgen = (<bitgen_t *> PyCapsule_GetPointer(capsule, name))[0]
         self._aug_state.bit_generator = &self._bitgen
-        self.lock = bit_generator.lock
+        if not keep_lock:
+            self.lock = bit_generator.lock
         self._reset_gauss()
 
     cdef _reset_gauss(self):
@@ -4880,6 +4887,11 @@ def set_bit_generator(bitgen):
     used both with an instance of ``Generator`` and with the singleton
     instance of RandomState.
 
+    The swap is performed while holding the singleton's current lock, and the
+    new bit generator is made to share that same lock object. This prevents
+    concurrent module-level draws from observing a partially updated bit
+    generator (gh-32063).
+
     See Also
     --------
     get_bit_generator
@@ -4887,7 +4899,11 @@ def set_bit_generator(bitgen):
     """
     cdef RandomState singleton
     singleton = _rand
-    singleton._initialize_bit_generator(bitgen)
+    # Hold the existing lock for the entire publication of the new bit
+    # generator. keep_lock preserves lock object identity so helpers that
+    # already captured self.lock remain correctly synchronized.
+    with singleton.lock:
+        singleton._initialize_bit_generator(bitgen, keep_lock=True)
 
 
 # Old aliases that should not be removed

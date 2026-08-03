@@ -1,8 +1,16 @@
+import pickle
+import sys
+import threading
+
+import pytest
+
 import numpy as np
 from numpy.random import SeedSequence
 from numpy.testing import (
+    IS_WASM,
     assert_array_compare,
     assert_array_equal,
+    assert_equal,
     assert_raises,
     assert_raises_regex,
 )
@@ -101,3 +109,51 @@ def test_seedsequence_rejects_nested_sequence():
         cyclic_seed = []
         cyclic_seed.append(cyclic_seed)
         SeedSequence(cyclic_seed)
+
+
+def test_seedsequence_pickle_preserves_state():
+    ss = SeedSequence(100, spawn_key=(1, 2), pool_size=6, n_children_spawned=3)
+    ss.spawn(2)
+    restored = pickle.loads(pickle.dumps(ss))
+    assert_equal(ss.state, restored.state)
+    assert_array_equal(ss.pool, restored.pool)
+    # Lock is not pickled; reconstituted instance gets a fresh lock.
+    assert restored.lock is not ss.lock
+    # Further spawning continues from the restored counter.
+    child = restored.spawn(1)[0]
+    assert child.spawn_key == ss.spawn_key + (ss.n_children_spawned,)
+
+
+@pytest.mark.skipif(IS_WASM, reason="can't start thread")
+def test_seedsequence_spawn_threadsafe():
+    # Regression test for gh-32063: concurrent spawn() must not hand out
+    # duplicate spawn keys.
+    prev_interval = sys.getswitchinterval()
+    sys.setswitchinterval(1e-5)
+    try:
+        ss = SeedSequence(0)
+        n_threads = 4
+        n_children = 500
+        barrier = threading.Barrier(n_threads)
+        results = [[] for _ in range(n_threads)]
+
+        def worker(out):
+            barrier.wait()
+            out.extend(ss.spawn(n_children))
+
+        threads = [
+            threading.Thread(target=worker, args=(results[i],))
+            for i in range(n_threads)
+        ]
+        for t in threads:
+            t.start()
+        for t in threads:
+            t.join()
+
+        keys = [c.spawn_key for r in results for c in r]
+        expected = n_threads * n_children
+        assert len(keys) == expected
+        assert len(set(keys)) == expected
+        assert ss.n_children_spawned == expected
+    finally:
+        sys.setswitchinterval(prev_interval)
