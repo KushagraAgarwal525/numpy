@@ -2203,7 +2203,7 @@ gentype_byteswap(PyObject *self, PyObject *args, PyObject *kwds)
  * #name = take, getfield, put, repeat, tofile, mean, trace, diagonal, clip,
  *         std, var, sum, cumsum, prod, cumprod, compress, sort, argsort,
  *         round, argmax, argmin, max, min, any, all, astype, resize,
- *         reshape, choose, tobytes, copy, searchsorted, view,
+ *         choose, tobytes, copy, searchsorted, view,
  *         flatten, ravel, squeeze#
  */
 static PyObject *
@@ -2212,6 +2212,36 @@ gentype_@name@(PyObject *self, PyObject *args, PyObject *kwds)
     return gentype_generic_method(self, args, kwds, "@name@");
 }
 /**end repeat**/
+
+/*
+ * reshape must always return an ndarray, including for shape ().
+ * gentype_generic_method uses PyArray_Return, which converts 0-d arrays
+ * back to scalars (gh-7964).
+ */
+static PyObject *
+gentype_reshape(PyObject *self, PyObject *args, PyObject *kwds)
+{
+    PyObject *arr, *meth, *ret;
+
+    arr = PyArray_FromScalar(self, NULL);
+    if (arr == NULL) {
+        return NULL;
+    }
+    meth = PyObject_GetAttrString(arr, "reshape");
+    if (meth == NULL) {
+        Py_DECREF(arr);
+        return NULL;
+    }
+    if (kwds == NULL) {
+        ret = PyObject_CallObject(meth, args);
+    }
+    else {
+        ret = PyObject_Call(meth, args, kwds);
+    }
+    Py_DECREF(meth);
+    Py_DECREF(arr);
+    return ret;
+}
 
 
 /**begin repeat
