@@ -1174,3 +1174,112 @@ def test_scalar_matches_array_op_with_pyscalar(op, sctype, other_type, rop):
         assert np.array(res).dtype == expected.dtype
     else:
         assert res.dtype == expected.dtype
+
+
+class ArrayUfuncCapture:
+    """Helper that records operands passed through ``__array_ufunc__``."""
+
+    def __init__(self):
+        self.calls = []
+
+    def __array_ufunc__(self, ufunc, method, *inputs, **kwargs):
+        self.calls.append((ufunc, method, inputs, kwargs))
+        return NotImplemented
+
+
+@pytest.mark.parametrize("cmp_op, ufunc", [
+    (operator.lt, np.less),
+    (operator.le, np.less_equal),
+    (operator.eq, np.equal),
+    (operator.ne, np.not_equal),
+    (operator.gt, np.greater),
+    (operator.ge, np.greater_equal),
+])
+@pytest.mark.parametrize("sctype", [
+    np.float16, np.float32, np.float64, np.longdouble,
+    np.int8, np.int16, np.int32, np.int64,
+    np.uint8, np.uint16, np.uint32, np.uint64,
+    np.complex64, np.complex128,
+])
+def test_scalar_richcompare_array_ufunc_keeps_scalar(cmp_op, ufunc, sctype):
+    # gh-12142: comparison operators must pass the NumPy scalar through to
+    # ``__array_ufunc__``, matching direct ufunc calls and arithmetic ops.
+    if sctype in (np.complex64, np.complex128) and cmp_op not in (
+            operator.eq, operator.ne):
+        pytest.skip("complex ordering comparisons are unordered")
+
+    capture = ArrayUfuncCapture()
+    scalar = sctype(1)
+
+    with pytest.raises(TypeError):
+        cmp_op(scalar, capture)
+
+    assert len(capture.calls) == 1
+    called_ufunc, method, inputs, kwargs = capture.calls[0]
+    assert called_ufunc is ufunc
+    assert method == "__call__"
+    assert kwargs == {}
+    assert len(inputs) == 2
+    assert type(inputs[0]) is sctype
+    assert inputs[0] == scalar
+    assert inputs[1] is capture
+
+    # Direct ufunc call already preserved the scalar; keep them aligned.
+    capture2 = ArrayUfuncCapture()
+    with pytest.raises(TypeError):
+        ufunc(scalar, capture2)
+    assert type(capture2.calls[0][2][0]) is sctype
+
+
+@pytest.mark.parametrize("cmp_op", [
+    operator.lt, operator.le, operator.eq, operator.ne, operator.gt, operator.ge,
+])
+def test_scalar_richcompare_array_ufunc_reflected(cmp_op):
+    # Reflected comparisons (duck array on the left) must also preserve the
+    # NumPy scalar when the operator falls back to the scalar richcompare.
+    capture = ArrayUfuncCapture()
+    scalar = np.float32(1)
+
+    with pytest.raises(TypeError):
+        cmp_op(capture, scalar)
+
+    assert len(capture.calls) >= 1
+    # The NumPy scalar should appear as an input somewhere without being
+    # promoted to ndarray.
+    found_scalar = False
+    for _ufunc, _method, inputs, _kwargs in capture.calls:
+        for inp in inputs:
+            if type(inp) is np.float32:
+                found_scalar = True
+                assert not isinstance(inp, np.ndarray) or type(inp) is np.float32
+    assert found_scalar
+
+
+def test_scalar_richcompare_still_works_with_arrays():
+    # Regression: scalar vs ndarray comparisons must keep working.
+    assert (np.float32(1) < np.array([0.0, 2.0], dtype=np.float32)).tolist() == [
+        False, True]
+    assert (np.int64(3) == np.array([3, 4])).tolist() == [True, False]
+    assert (np.float64(2) >= np.array([1.0, 2.0, 3.0])).tolist() == [
+        True, True, False]
+
+
+def test_scalar_richcompare_masked_array_uses_filled_values():
+    # ndarray-subclass richcompare (MaskedArray) must still win when a
+    # NumPy scalar is on the left, so masked values are filled.
+    import numpy.ma as ma
+
+    b = ma.array([0.0, 1.0], mask=[True, False], fill_value=1.0)
+    result = np.float64(0.0) != b
+    assert isinstance(result, ma.MaskedArray)
+    assert result.data.tolist() == [True, True]
+    assert result.mask.tolist() == [True, False]
+
+
+def test_void_scalar_richcompare_unchanged():
+    # Void comparisons still go through the array richcompare special path.
+    v = np.void(b"ab")
+    assert v == v
+    assert v != np.void(b"ac")
+    with pytest.raises(TypeError, match="structured or void"):
+        v == b"ab"
