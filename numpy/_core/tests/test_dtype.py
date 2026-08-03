@@ -126,6 +126,66 @@ class TestBuiltin:
         with pytest.raises(TypeError):
             operation(np.dtype(np.int32), 7)
 
+    def test_richcompare_one_way_cast_order(self):
+        # Ordered comparisons use one-way CanCastTo (gh-28072).
+        assert np.dtype('i4') < np.dtype('i8')
+        assert not (np.dtype('i4') > np.dtype('i8'))
+        assert np.dtype('i4') <= np.dtype('i8')
+        assert not (np.dtype('i4') >= np.dtype('i8'))
+
+        assert np.dtype('S1') < np.dtype('S2')
+        assert not (np.dtype('S1') > np.dtype('S2'))
+        assert np.dtype('S1') <= np.dtype('S2')
+        assert not (np.dtype('S1') >= np.dtype('S2'))
+
+        assert np.dtype('U1') < np.dtype('U2')
+        assert not (np.dtype('f4') > np.dtype('f8'))
+
+    @pytest.mark.parametrize(
+        'unsized, sized',
+        [
+            ('S', 'S1'),
+            ('S0', 'S2'),
+            ('S', 'S4'),
+            ('S', 'c'),  # 'c' is an alias for sized S1
+            ('U', 'U1'),
+            ('U0', 'U2'),
+            ('V', 'V1'),
+            ('V0', 'V8'),
+        ],
+    )
+    def test_richcompare_unsized_flexible_incomparable(self, unsized, sized):
+        # Unsized flexible dtypes can cast both to and from a sized dtype of
+        # the same kind, so they must not compare as both `<` and `>` (gh-28072).
+        a = np.dtype(unsized)
+        b = np.dtype(sized)
+        if a == b:
+            assert a <= b and a >= b
+            assert not (a < b) and not (a > b)
+            return
+
+        assert a != b
+        assert not (a < b)
+        assert not (a > b)
+        assert not (a <= b)
+        assert not (a >= b)
+        # Symmetric: sized vs unsized is also incomparable.
+        assert not (b < a)
+        assert not (b > a)
+        assert not (b <= a)
+        assert not (b >= a)
+
+    def test_richcompare_equivalent_flexible(self):
+        assert np.dtype('c') == np.dtype('S1')
+        assert np.dtype('c') <= np.dtype('S1')
+        assert np.dtype('c') >= np.dtype('S1')
+        assert not (np.dtype('c') < np.dtype('S1'))
+        assert not (np.dtype('c') > np.dtype('S1'))
+
+        assert np.dtype('S') == np.dtype('S0')
+        assert np.dtype('U') == np.dtype('U0')
+        assert np.dtype('V') == np.dtype('V0')
+
     @pytest.mark.parametrize("dtype",
              ['Bool', 'Bytes0', 'Complex32', 'Complex64',
               'Datetime64', 'Float16', 'Float32', 'Float64',

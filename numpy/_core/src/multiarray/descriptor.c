@@ -3625,36 +3625,46 @@ arraydescr_richcompare(PyArray_Descr *self, PyObject *other, int cmp_op)
         Py_RETURN_NOTIMPLEMENTED;
     }
 
+    /*
+     * Order dtypes by one-way safe casting.  Mutual CanCastTo without
+     * EquivTypes arises for unsized flexible dtypes (e.g. "S0" <-> "S1"):
+     * treat those as incomparable so that both `<` and `>` cannot be true.
+     * See gh-28072.
+     */
+    npy_bool equivalent = PyArray_EquivTypes(self, new);
+    npy_bool self_to_new = 0;
+    npy_bool new_to_self = 0;
+    if (!equivalent) {
+        self_to_new = PyArray_CanCastTo(self, new);
+        new_to_self = PyArray_CanCastTo(new, self);
+    }
+
     npy_bool ret;
     switch (cmp_op) {
     case Py_LT:
-        ret = !PyArray_EquivTypes(self, new) && PyArray_CanCastTo(self, new);
-        Py_DECREF(new);
-        return PyBool_FromLong(ret);
+        ret = !equivalent && self_to_new && !new_to_self;
+        break;
     case Py_LE:
-        ret = PyArray_CanCastTo(self, new);
-        Py_DECREF(new);
-        return PyBool_FromLong(ret);
+        ret = equivalent || (self_to_new && !new_to_self);
+        break;
     case Py_EQ:
-        ret = PyArray_EquivTypes(self, new);
-        Py_DECREF(new);
-        return PyBool_FromLong(ret);
+        ret = equivalent;
+        break;
     case Py_NE:
-        ret = !PyArray_EquivTypes(self, new);
-        Py_DECREF(new);
-        return PyBool_FromLong(ret);
+        ret = !equivalent;
+        break;
     case Py_GT:
-        ret = !PyArray_EquivTypes(self, new) && PyArray_CanCastTo(new, self);
-        Py_DECREF(new);
-        return PyBool_FromLong(ret);
+        ret = !equivalent && new_to_self && !self_to_new;
+        break;
     case Py_GE:
-        ret = PyArray_CanCastTo(new, self);
-        Py_DECREF(new);
-        return PyBool_FromLong(ret);
+        ret = equivalent || (new_to_self && !self_to_new);
+        break;
     default:
         Py_DECREF(new);
         Py_RETURN_NOTIMPLEMENTED;
     }
+    Py_DECREF(new);
+    return PyBool_FromLong(ret);
 }
 
 static int
