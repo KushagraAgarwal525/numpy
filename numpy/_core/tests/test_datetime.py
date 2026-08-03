@@ -671,6 +671,25 @@ class TestDateTime:
         assert_equal(clnan.astype('timedelta64[ns]'), nat)
         assert_equal(hnan.astype('timedelta64[ns]'), nat)
 
+        # NaT -> NaN for floating and complex dtypes (gh-8449)
+        for unit in ('D', 'ns'):
+            for dt in ('m8', 'M8'):
+                arr = np.array([3, 'NaT'], dtype=f'{dt}[{unit}]')
+                for ftype in (np.float16, np.float32, np.float64, np.longdouble):
+                    out = arr.astype(ftype)
+                    assert_equal(out[0], ftype(3))
+                    assert_(np.isnan(out[1]))
+                for ctype in (np.complex64, np.complex128, np.clongdouble):
+                    out = arr.astype(ctype)
+                    assert_equal(out[0], ctype(3))
+                    assert_(np.isnan(out[1].real))
+                    assert_equal(out[1].imag, 0)
+
+                # scalars
+                nat_scalar = arr[1]
+                for ftype in (np.float16, np.float32, np.float64, np.longdouble):
+                    assert_(np.isnan(nat_scalar.astype(ftype)))
+
     def test_days_creation(self):
         assert_equal(np.array('1599', dtype='M8[D]').astype('i8'),
                 (1600 - 1970) * 365 - (1972 - 1600) / 4 + 3 - 365)

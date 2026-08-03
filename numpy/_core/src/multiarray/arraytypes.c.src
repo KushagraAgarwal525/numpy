@@ -1353,8 +1353,17 @@ static void
     @type2@ *op = output;
 
     while (n--) {
-        @type1@ t = (@type1@)*ip++;
-
+        @type1@ t = *ip++;
+#if @floatingpoint@
+        /* NaT must become NaN, not the raw INT64_MIN bit pattern (gh-8449) */
+        if (t == NPY_DATETIME_NAT) {
+            *op++ = (@type2@)NPY_NAN;
+#if @steps@ == 2  /* complex type */
+            *op++ = (@type2@)0;
+#endif
+            continue;
+        }
+#endif
         *op++ = (@type2@)t;
 #if @steps@ == 2  /* complex type */
         *op++ = 0;
@@ -1401,7 +1410,14 @@ static void
     npy_half *op = output;
 
     while (n--) {
-        *op++ = npy_float_to_half((float)(*ip++));
+        @type@ t = *ip++;
+        /* NaT must become NaN, not -inf from casting INT64_MIN (gh-8449) */
+        if (t == NPY_DATETIME_NAT) {
+            *op++ = NPY_HALF_NAN;
+        }
+        else {
+            *op++ = npy_float_to_half((float)t);
+        }
     }
 }
 
