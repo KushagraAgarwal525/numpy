@@ -1445,16 +1445,71 @@ def unique(ar1, return_index=False, return_inverse=False):
                 mask=[False, False, False,  True],
         fill_value=999999), array([0, 1, 4, 2]), array([0, 1, 3, 1, 2]))
     """
-    output = np.unique(ar1,
-                       return_index=return_index,
-                       return_inverse=return_inverse)
-    if isinstance(output, tuple):
-        output = list(output)
-        output[0] = output[0].view(MaskedArray)
-        output = tuple(output)
-    else:
-        output = output.view(MaskedArray)
-    return output
+    ar = asarray(ar1)
+    shape = ar.shape
+    mask = getmaskarray(ar)
+    flat_mask = mask.reshape(-1)
+
+    # When nothing is masked, defer to np.unique on the raw data.  Using the
+    # MaskedArray path would be fine here, but asarray(data) keeps the logic
+    # consistent with the masked branch below.
+    if not flat_mask.any():
+        output = np.unique(getdata(ar),
+                           return_index=return_index,
+                           return_inverse=return_inverse)
+        if isinstance(output, tuple):
+            output = list(output)
+            output[0] = output[0].view(MaskedArray)
+            output = tuple(output)
+        else:
+            output = output.view(MaskedArray)
+        return output
+
+    # Masked values must not participate in the sort/equality that np.unique
+    # uses.  Filling them with fill_value (the old approach via MaskedArray
+    # sorting) collides whenever fill_value wraps into the dtype range, e.g.
+    # uint8 with the default fill_value 999999 (gh-14804).
+    data = getdata(ar).reshape(-1)
+    valid = ~flat_mask
+    if not valid.any():
+        # Fully masked: a single masked unique entry.
+        out = masked_array(data[:1].copy(), mask=[True],
+                           fill_value=ar.fill_value)
+        outputs = [out]
+        if return_index:
+            outputs.append(np.array([0], dtype=np.intp))
+        if return_inverse:
+            outputs.append(np.zeros(shape, dtype=np.intp))
+        return tuple(outputs) if len(outputs) > 1 else out
+
+    valid_data = data[valid]
+    orig_pos = np.flatnonzero(valid)
+    res = np.unique(valid_data, return_index=True,
+                    return_inverse=return_inverse)
+    uniq = res[0]
+    idx_in_valid = res[1]
+    n = uniq.size
+    first_masked = int(np.flatnonzero(flat_mask)[0])
+
+    out_data = np.empty(n + 1, dtype=uniq.dtype)
+    out_data[:n] = uniq
+    out_data[n] = data[first_masked]
+    out_mask = np.zeros(n + 1, dtype=bool)
+    out_mask[n] = True
+    out = masked_array(out_data, mask=out_mask, fill_value=ar.fill_value)
+
+    outputs = [out]
+    if return_index:
+        idx = np.empty(n + 1, dtype=np.intp)
+        idx[:n] = orig_pos[idx_in_valid]
+        idx[n] = first_masked
+        outputs.append(idx)
+    if return_inverse:
+        inv = np.empty(data.size, dtype=np.intp)
+        inv[valid] = res[2]
+        inv[flat_mask] = n
+        outputs.append(inv.reshape(shape))
+    return tuple(outputs) if len(outputs) > 1 else out
 
 
 def intersect1d(ar1, ar2, assume_unique=False):
