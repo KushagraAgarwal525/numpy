@@ -3103,6 +3103,98 @@ class TestSign:
 
         assert_raises(TypeError, test_nan)
 
+    @pytest.mark.parametrize(
+        "dtype", [np.float16, np.float32, np.float64, np.longdouble]
+    )
+    def test_sign_negative_zero_signbit(self, dtype):
+        # gh-29485: np.sign(-0.0) must preserve the sign bit of -0.0.
+        # Equality alone cannot detect this because -0.0 == 0.0.
+        neg_zero = dtype(-0.0)
+        result = np.sign(neg_zero)
+        assert np.signbit(result), (
+            f"np.sign(-0.0) lost the sign bit for {dtype.__name__}"
+        )
+
+        pos_zero = dtype(0.0)
+        result_pos = np.sign(pos_zero)
+        assert not np.signbit(result_pos), (
+            f"np.sign(+0.0) unexpectedly set the sign bit for {dtype.__name__}"
+        )
+
+        arr = np.array([-np.inf, -2.0, -0.0, 0.0, 2.0, np.inf, np.nan],
+                       dtype=dtype)
+        with np.errstate(invalid='ignore'):
+            signed = np.sign(arr)
+        assert_array_equal(
+            np.signbit(signed),
+            [True, True, True, False, False, False, False],
+        )
+        # Non-zero magnitudes still map to ±1; zeros keep magnitude 0.
+        assert_array_equal(signed[:-1],
+                           np.array([-1, -1, -0.0, 0.0, 1, 1], dtype=dtype))
+        assert np.isnan(signed[-1])
+
+        out = np.empty(arr.shape, dtype=dtype)
+        with np.errstate(invalid='ignore'):
+            np.sign(arr, out=out)
+        assert_array_equal(np.signbit(out), np.signbit(signed))
+        assert np.signbit(out[2])
+        assert not np.signbit(out[3])
+
+        # Contiguous and non-contiguous / strided inputs
+        big = np.zeros(32, dtype=dtype)
+        big[::3] = dtype(-0.0)
+        big[1::3] = dtype(0.0)
+        big[2::3] = dtype(-3.0)
+        signed_big = np.sign(big)
+        assert_array_equal(np.signbit(signed_big[::3]), True)
+        assert_array_equal(np.signbit(signed_big[1::3]), False)
+        assert_array_equal(signed_big[2::3], dtype(-1.0))
+
+        strided = arr[::2]
+        with np.errstate(invalid='ignore'):
+            signed_strided = np.sign(strided)
+        assert_array_equal(np.signbit(signed_strided),
+                           np.signbit(signed[::2]))
+
+    @pytest.mark.parametrize("dtype", [np.complex64, np.complex128,
+                                       np.clongdouble])
+    @pytest.mark.parametrize(
+        "real, imag, expect_real_neg, expect_imag_neg",
+        [
+            (-0.0, -0.0, True, True),
+            (0.0, -0.0, False, True),
+            (-0.0, 0.0, True, False),
+            (0.0, 0.0, False, False),
+        ],
+    )
+    def test_sign_complex_negative_zero_signbit(
+        self, dtype, real, imag, expect_real_neg, expect_imag_neg
+    ):
+        # gh-29485: each zero component of a complex zero keeps its sign.
+        z = dtype(complex(real, imag))
+        result = np.sign(z)
+        assert np.signbit(result.real) == expect_real_neg, (
+            f"np.sign({z!r}).real signbit wrong for {dtype.__name__}"
+        )
+        assert np.signbit(result.imag) == expect_imag_neg, (
+            f"np.sign({z!r}).imag signbit wrong for {dtype.__name__}"
+        )
+        assert result.real == 0 and result.imag == 0
+
+        arr = np.array([z, dtype(1 + 0j), dtype(-1 + 0j)], dtype=dtype)
+        signed = np.sign(arr)
+        assert np.signbit(signed[0].real) == expect_real_neg
+        assert np.signbit(signed[0].imag) == expect_imag_neg
+        assert signed[1] == dtype(1 + 0j)
+        assert signed[2] == dtype(-1 + 0j)
+
+        out = np.empty(arr.shape, dtype=dtype)
+        np.sign(arr, out=out)
+        assert np.signbit(out[0].real) == expect_real_neg
+        assert np.signbit(out[0].imag) == expect_imag_neg
+
+
 class TestMinMax:
     def test_minmax_blocked(self):
         # simd tests on max/min, test all alignments, slow but important
