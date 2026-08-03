@@ -30,35 +30,56 @@ typedef enum {
  * Returns -1 if the array is monotonic decreasing,
  * +1 if the array is monotonic increasing,
  * and 0 if the array is not monotonic.
+ *
+ * Uses the array dtype's compare function so values are checked in their
+ * native type (float128, datetime64, large integers, ...) without casting
+ * through float64, which loses precision or may be impossible (gh-9509,
+ * gh-11022).
  */
 static int
-check_array_monotonic(const double *a, npy_intp lena)
+check_array_monotonic(PyArrayObject *arr)
 {
     npy_intp i;
-    double next;
-    double last;
+    npy_intp lena = PyArray_SIZE(arr);
+    npy_intp stride = PyArray_STRIDE(arr, 0);
+    char *data = (char *)PyArray_DATA(arr);
+    char *last;
+    char *next = NULL;
+    int cmp = 0;
+    PyArray_CompareFunc *compare =
+            PyDataType_GetArrFuncs(PyArray_DESCR(arr))->compare;
 
-    if (lena == 0) {
-        /* all bin edges hold the same value */
+    if (compare == NULL) {
+        return -2;  /* signal missing compare */
+    }
+
+    if (lena <= 1) {
+        /* empty or single-element arrays are treated as increasing */
         return 1;
     }
-    last = a[0];
+
+    last = data;
 
     /* Skip repeated values at the beginning of the array */
-    for (i = 1; (i < lena) && (a[i] == last); i++);
+    for (i = 1; i < lena; i++) {
+        next = data + i * stride;
+        cmp = compare(last, next, arr);
+        if (cmp != 0) {
+            break;
+        }
+    }
 
     if (i == lena) {
         /* all bin edges hold the same value */
         return 1;
     }
 
-    next = a[i];
-    if (last < next) {
+    if (cmp < 0) {
         /* Possibly monotonic increasing */
         for (i += 1; i < lena; i++) {
             last = next;
-            next = a[i];
-            if (last > next) {
+            next = data + i * stride;
+            if (compare(last, next, arr) > 0) {
                 return 0;
             }
         }
@@ -68,8 +89,8 @@ check_array_monotonic(const double *a, npy_intp lena)
         /* last > next, possibly monotonic decreasing */
         for (i += 1; i < lena; i++) {
             last = next;
-            next = a[i];
-            if (last < next) {
+            next = data + i * stride;
+            if (compare(last, next, arr) < 0) {
                 return 0;
             }
         }
@@ -279,7 +300,6 @@ arr__monotonicity(PyObject *NPY_UNUSED(self), PyObject *args, PyObject *kwds)
     PyObject *obj_x = NULL;
     PyArrayObject *arr_x = NULL;
     long monotonic;
-    npy_intp len_x;
     NPY_BEGIN_THREADS_DEF;
 
     if (!PyArg_ParseTupleAndKeywords(args, kwds, "O:_monotonicity", kwlist,
@@ -287,23 +307,30 @@ arr__monotonicity(PyObject *NPY_UNUSED(self), PyObject *args, PyObject *kwds)
         return NULL;
     }
 
-    /*
-     * TODO:
-     *  `x` could be strided, needs change to check_array_monotonic
-     *  `x` is forced to double for this check
-     */
-    arr_x = (PyArrayObject *)PyArray_FROMANY(
-        obj_x, NPY_DOUBLE, 1, 1, NPY_ARRAY_CARRAY_RO);
+    /* Keep native dtype; do not cast through float64 (gh-9509, gh-11022). */
+    arr_x = (PyArrayObject *)PyArray_FromAny(
+            obj_x, NULL, 1, 1, NPY_ARRAY_CARRAY_RO, NULL);
     if (arr_x == NULL) {
         return NULL;
     }
 
-    len_x = PyArray_SIZE(arr_x);
-    NPY_BEGIN_THREADS_THRESHOLDED(len_x)
-    monotonic = check_array_monotonic(
-        (const double *)PyArray_DATA(arr_x), len_x);
-    NPY_END_THREADS
+    if (PyDataType_GetArrFuncs(PyArray_DESCR(arr_x))->compare == NULL) {
+        PyErr_SetString(PyExc_TypeError,
+                        "_monotonicity requires a comparable dtype");
+        Py_DECREF(arr_x);
+        return NULL;
+    }
+
+    NPY_BEGIN_THREADS_DESCR(PyArray_DESCR(arr_x));
+    monotonic = check_array_monotonic(arr_x);
+    NPY_END_THREADS_DESCR(PyArray_DESCR(arr_x));
     Py_DECREF(arr_x);
+
+    if (monotonic < -1) {
+        PyErr_SetString(PyExc_TypeError,
+                        "_monotonicity requires a comparable dtype");
+        return NULL;
+    }
 
     return PyLong_FromLong(monotonic);
 }
