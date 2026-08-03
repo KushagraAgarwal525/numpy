@@ -609,8 +609,176 @@ array_tobytes(PyArrayObject *self, PyObject *args, PyObject *kwds)
 
 /* Like PyArray_ToFile but takes the file as a python object */
 static int
+PyArray_ToFileObject_via_python(PyArrayObject *self, PyObject *file,
+                                char *sep, char *format)
+{
+    size_t n3 = (sep ? strlen((const char *)sep) : 0);
+
+    if (n3 == 0) {
+        /* binary: write C-order bytes via the file object's write() */
+        PyObject *bytes, *write_ret;
+        Py_ssize_t expected, written;
+
+        if (PyDataType_FLAGCHK(PyArray_DESCR(self), NPY_LIST_PICKLE)) {
+            PyErr_SetString(PyExc_OSError,
+                    "cannot write object arrays to a file in binary mode");
+            return -1;
+        }
+        if (PyArray_ITEMSIZE(self) == 0) {
+            return 0;
+        }
+
+        bytes = PyArray_ToString(self, NPY_CORDER);
+        if (bytes == NULL) {
+            return -1;
+        }
+        expected = PyBytes_GET_SIZE(bytes);
+        write_ret = PyObject_CallMethod(file, "write", "O", bytes);
+        Py_DECREF(bytes);
+        if (write_ret == NULL) {
+            return -1;
+        }
+        written = PyNumber_AsSsize_t(write_ret, PyExc_OSError);
+        Py_DECREF(write_ret);
+        if (written == -1 && PyErr_Occurred()) {
+            return -1;
+        }
+        if (written != expected) {
+            PyErr_Format(PyExc_OSError,
+                    "%ld requested and %ld written",
+                    (long)expected, (long)written);
+            return -1;
+        }
+        return 0;
+    }
+    else {
+        /*
+         * text data: same formatting as PyArray_ToFile, but write() through
+         * the Python file object so compression wrappers see logical bytes.
+         */
+        PyArrayIterObject *it;
+        PyObject *obj, *strobj, *tupobj, *byteobj, *formatobj = NULL;
+        PyObject *write_ret;
+        size_t n4 = (format ? strlen((const char *)format) : 0);
+        Py_ssize_t n2, written;
+
+        it = (PyArrayIterObject *)PyArray_IterNew((PyObject *)self);
+        if (it == NULL) {
+            return -1;
+        }
+        if (n4 != 0) {
+            formatobj = PyUnicode_FromString((const char *)format);
+            if (formatobj == NULL) {
+                Py_DECREF(it);
+                return -1;
+            }
+        }
+        while (it->index < it->size) {
+            obj = PyArray_GETITEM(self, it->dataptr);
+            if (obj == NULL) {
+                Py_XDECREF(formatobj);
+                Py_DECREF(it);
+                return -1;
+            }
+            if (n4 == 0) {
+                strobj = PyObject_Str(obj);
+                Py_DECREF(obj);
+                if (strobj == NULL) {
+                    Py_XDECREF(formatobj);
+                    Py_DECREF(it);
+                    return -1;
+                }
+            }
+            else {
+                tupobj = PyTuple_New(1);
+                if (tupobj == NULL) {
+                    Py_DECREF(obj);
+                    Py_XDECREF(formatobj);
+                    Py_DECREF(it);
+                    return -1;
+                }
+                PyTuple_SET_ITEM(tupobj, 0, obj);
+                strobj = PyUnicode_Format(formatobj, tupobj);
+                Py_DECREF(tupobj);
+                if (strobj == NULL) {
+                    Py_XDECREF(formatobj);
+                    Py_DECREF(it);
+                    return -1;
+                }
+            }
+            byteobj = PyUnicode_AsASCIIString(strobj);
+            Py_DECREF(strobj);
+            if (byteobj == NULL) {
+                Py_XDECREF(formatobj);
+                Py_DECREF(it);
+                return -1;
+            }
+            n2 = PyBytes_GET_SIZE(byteobj);
+            write_ret = PyObject_CallMethod(file, "write", "O", byteobj);
+            Py_DECREF(byteobj);
+            if (write_ret == NULL) {
+                Py_XDECREF(formatobj);
+                Py_DECREF(it);
+                return -1;
+            }
+            written = PyNumber_AsSsize_t(write_ret, PyExc_OSError);
+            Py_DECREF(write_ret);
+            if (written == -1 && PyErr_Occurred()) {
+                Py_XDECREF(formatobj);
+                Py_DECREF(it);
+                return -1;
+            }
+            if (written < n2) {
+                PyErr_Format(PyExc_OSError,
+                        "problem writing element %" NPY_INTP_FMT
+                        " to file", it->index);
+                Py_XDECREF(formatobj);
+                Py_DECREF(it);
+                return -1;
+            }
+            if (it->index != it->size - 1) {
+                write_ret = PyObject_CallMethod(file, "write", "y#", sep,
+                                                (Py_ssize_t)n3);
+                if (write_ret == NULL) {
+                    Py_XDECREF(formatobj);
+                    Py_DECREF(it);
+                    return -1;
+                }
+                written = PyNumber_AsSsize_t(write_ret, PyExc_OSError);
+                Py_DECREF(write_ret);
+                if (written == -1 && PyErr_Occurred()) {
+                    Py_XDECREF(formatobj);
+                    Py_DECREF(it);
+                    return -1;
+                }
+                if ((size_t)written < n3) {
+                    PyErr_SetString(PyExc_OSError,
+                            "problem writing separator to file");
+                    Py_XDECREF(formatobj);
+                    Py_DECREF(it);
+                    return -1;
+                }
+            }
+            PyArray_ITER_NEXT(it);
+        }
+        Py_XDECREF(formatobj);
+        Py_DECREF(it);
+        return 0;
+    }
+}
+
+/* Like PyArray_ToFile but takes the file as a python object */
+static int
 PyArray_ToFileObject(PyArrayObject *self, PyObject *file, char *sep, char *format)
 {
+    /*
+     * Compression wrappers expose fileno() of the compressed stream; writing
+     * via C stdio would bypass compression (gh-10866). Use write() instead.
+     */
+    if (npy_PyFile_IsCompressionWrapper(file)) {
+        return PyArray_ToFileObject_via_python(self, file, sep, format);
+    }
+
     npy_off_t orig_pos = 0;
     FILE *fd = npy_PyFile_Dup2(file, "wb", &orig_pos);
 

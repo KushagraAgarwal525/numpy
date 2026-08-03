@@ -1,12 +1,15 @@
 import builtins
+import bz2
 import collections.abc
 import ctypes
 import functools
 import gc
+import gzip
 import importlib
 import inspect
 import io
 import itertools
+import lzma
 import mmap
 import operator
 import os
@@ -6608,6 +6611,43 @@ class TestIO:
         with open(tmp_filename, 'rb', buffering=-1) as f:
             y = np.fromfile(f, dtype=x.dtype)
         assert_array_equal(y, x.flat)
+
+    @pytest.mark.parametrize("opener", [gzip.open, lzma.open, bz2.open])
+    def test_compressed_fromfile_tofile_roundtrip(self, tmp_path, opener):
+        # gh-10866: compression wrappers expose fileno() of the compressed
+        # stream; fromfile/tofile must use the Python read/write path.
+        x = np.arange(9, dtype=np.int64)
+        path = tmp_path / "data.bin"
+
+        with opener(path, "wb") as f:
+            x.tofile(f)
+        with opener(path, "rb") as f:
+            y = np.fromfile(f, dtype=x.dtype)
+        assert_array_equal(y, x)
+
+        # count and offset against uncompressed logical stream
+        with opener(path, "rb") as f:
+            y = np.fromfile(f, dtype=x.dtype, count=3)
+        assert_array_equal(y, x[:3])
+
+        with opener(path, "rb") as f:
+            y = np.fromfile(f, dtype=x.dtype, count=2, offset=x.dtype.itemsize)
+        assert_array_equal(y, x[1:3])
+
+        # text mode
+        with opener(path, "wb") as f:
+            x.tofile(f, sep=",")
+        with opener(path, "rb") as f:
+            y = np.fromfile(f, dtype=x.dtype, sep=",")
+        assert_array_equal(y, x)
+
+        # file position advances on the logical (decompressed) stream
+        with opener(path, "wb") as f:
+            x.tofile(f)
+        with opener(path, "rb") as f:
+            np.fromfile(f, dtype=x.dtype, count=2)
+            pos = f.tell()
+        assert_equal(pos, 2 * x.dtype.itemsize)
 
     def test_file_position_after_fromfile(self, tmp_path, param_filename):
         # gh-4118

@@ -2360,6 +2360,121 @@ array_fromstring(PyObject *NPY_UNUSED(ignored), PyObject *args, PyObject *keywds
 
 
 static PyObject *
+/*
+ * Read an array from a Python file-like object via its read()/seek() methods.
+ * Used for stdlib compression wrappers (gzip/lzma/bz2) whose fileno() points
+ * at the compressed on-disk stream (gh-10866). Steals a reference to dtype.
+ */
+array_fromfile_via_python(PyObject *file, PyArray_Descr *dtype, npy_intp num,
+                          char *sep, npy_off_t offset)
+{
+    PyObject *data = NULL, *ret = NULL;
+    char *raw;
+    Py_ssize_t nbytes_read;
+    int elsize;
+
+    if (dtype == NULL) {
+        return NULL;
+    }
+
+    if (offset != 0) {
+        PyObject *seek_ret = PyObject_CallMethod(
+                file, "seek", NPY_OFF_T_PYFMT "i", offset, SEEK_CUR);
+        if (seek_ret == NULL) {
+            Py_DECREF(dtype);
+            return NULL;
+        }
+        Py_DECREF(seek_ret);
+    }
+
+    if (PyDataType_REFCHK(dtype)) {
+        PyErr_SetString(PyExc_ValueError, "Cannot read into object array");
+        Py_DECREF(dtype);
+        return NULL;
+    }
+
+    elsize = dtype->elsize;
+    if (elsize == 0) {
+        /* Nothing to read; match PyArray_FromFile empty-string behavior */
+        return PyArray_NewFromDescr_int(
+                &PyArray_Type, dtype,
+                1, &num, NULL, NULL,
+                0, NULL, NULL,
+                _NPY_ARRAY_ALLOW_EMPTY_STRING);
+    }
+
+    if ((sep == NULL) || (sep[0] == '\0')) {
+        if (num < 0) {
+            data = PyObject_CallMethod(file, "read", NULL);
+        }
+        else {
+            npy_intp nbytes;
+            if (npy_mul_sizes_with_overflow(&nbytes, num, elsize)) {
+                PyErr_SetString(PyExc_OverflowError,
+                                "object too large to safely allocate into an array");
+                Py_DECREF(dtype);
+                return NULL;
+            }
+            data = PyObject_CallMethod(file, "read", "n", (Py_ssize_t)nbytes);
+        }
+        if (data == NULL) {
+            Py_DECREF(dtype);
+            return NULL;
+        }
+        if (!PyBytes_Check(data)) {
+            PyErr_SetString(PyExc_TypeError,
+                            "file read() method must return bytes for binary fromfile");
+            Py_DECREF(data);
+            Py_DECREF(dtype);
+            return NULL;
+        }
+        nbytes_read = PyBytes_GET_SIZE(data);
+        raw = PyBytes_AS_STRING(data);
+        /*
+         * Match FromFile: only complete elements; short reads resize down
+         * rather than raising.
+         */
+        {
+            npy_intp nread = (npy_intp)(nbytes_read / elsize);
+            npy_intp take = (num < 0 || nread < num) ? nread : num;
+            ret = PyArray_FromString(raw, take * (npy_intp)elsize, dtype,
+                                     take, "");
+        }
+        Py_DECREF(data);
+        return ret;
+    }
+    else {
+        data = PyObject_CallMethod(file, "read", NULL);
+        if (data == NULL) {
+            Py_DECREF(dtype);
+            return NULL;
+        }
+        if (PyUnicode_Check(data)) {
+            PyObject *bytes = PyUnicode_AsUTF8String(data);
+            Py_DECREF(data);
+            if (bytes == NULL) {
+                Py_DECREF(dtype);
+                return NULL;
+            }
+            data = bytes;
+        }
+        else if (!PyBytes_Check(data)) {
+            PyErr_SetString(PyExc_TypeError,
+                            "file read() method must return bytes or str for "
+                            "text fromfile");
+            Py_DECREF(data);
+            Py_DECREF(dtype);
+            return NULL;
+        }
+        nbytes_read = PyBytes_GET_SIZE(data);
+        raw = PyBytes_AS_STRING(data);
+        ret = PyArray_FromString(raw, (npy_intp)nbytes_read, dtype, num, sep);
+        Py_DECREF(data);
+        return ret;
+    }
+}
+
+static PyObject *
 array_fromfile(PyObject *NPY_UNUSED(ignored), PyObject *args, PyObject *keywds)
 {
     PyObject *file = NULL, *ret = NULL;
@@ -2412,6 +2527,25 @@ array_fromfile(PyObject *NPY_UNUSED(ignored), PyObject *args, PyObject *keywds)
     else {
         own = 0;
     }
+
+    /*
+     * Compression wrappers (gzip/lzma/bz2) expose fileno() of the compressed
+     * stream. Prefer their Python read() path so we do not silently return
+     * corrupt data (gh-10866).
+     */
+    if (!own && npy_PyFile_IsCompressionWrapper(file)) {
+        if (type == NULL) {
+            type = PyArray_DescrFromType(NPY_DEFAULT_TYPE);
+            if (type == NULL) {
+                Py_DECREF(file);
+                return NULL;
+            }
+        }
+        ret = array_fromfile_via_python(file, type, (npy_intp)nin, sep, offset);
+        Py_DECREF(file);
+        return ret;
+    }
+
     fp = npy_PyFile_Dup2(file, "rb", &orig_pos);
     if (fp == NULL) {
         Py_DECREF(file);

@@ -1,0 +1,8 @@
+``fromfile`` / ``tofile`` support gzip/lzma/bz2 file objects
+------------------------------------------------------------
+
+``numpy.fromfile`` and ``ndarray.tofile`` previously used the raw ``fileno()``
+of ``gzip``, ``lzma``, and ``bz2`` file objects, which points at the compressed
+on-disk stream. That silently returned or wrote corrupt data. They now detect
+these compression wrappers and use the object's ``read`` / ``write`` methods so
+data is compressed and decompressed correctly.
