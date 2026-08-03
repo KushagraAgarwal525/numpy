@@ -235,6 +235,39 @@ class TestDevice:
         assert scalar.__array_namespace__() is np
 
 
+class TestScalarReshape:
+    # gh-7964: reshape on array scalars must return an ndarray, not a scalar,
+    # even when the result shape is ().
+    @pytest.mark.parametrize("scalar", [
+        np.bool(True), np.int64(0), np.float32(1.5), np.complex128(1 + 2j),
+    ])
+    def test_reshape_empty_tuple_returns_ndarray(self, scalar):
+        out = scalar.reshape(())
+        assert isinstance(out, np.ndarray)
+        assert not isinstance(out, np.generic)
+        assert out.shape == ()
+        assert out.dtype == scalar.dtype
+        assert_equal(out, np.array(scalar))
+
+        out2 = np.reshape(scalar, ())
+        assert isinstance(out2, np.ndarray)
+        assert out2.shape == ()
+
+    def test_reshape_matches_python_int(self):
+        # Python int and NumPy integer scalars should both yield ndarrays.
+        assert isinstance(np.reshape(0, ()), np.ndarray)
+        assert isinstance(np.reshape(np.int64(0), ()), np.ndarray)
+        assert_equal(np.reshape(np.int64(0), ()), np.reshape(0, ()))
+
+    def test_void_reshape_remains_void(self):
+        # Structured void scalars must stay void after reshape(()) so that
+        # MaskedArray mask handling keeps field indexing as scalars.
+        v = np.array([(1, 2)], dtype=[('a', 'i4'), ('b', 'i4')])[0]
+        out = v.reshape(())
+        assert type(out) is np.void
+        assert type(out['a']) is np.int32
+
+
 @pytest.mark.parametrize("scalar", [np.bool(True), np.int8(1), np.float64(1)])
 def test_array_wrap(scalar):
     # Test scalars array wrap as long as it exists.  NumPy itself should
