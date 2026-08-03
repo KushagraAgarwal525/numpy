@@ -216,6 +216,30 @@ class TestDateTime:
             assert_(np.datetime64("NaT") != np.datetime64("NaT", "us"))
             assert_(np.datetime64('NaT', 'us') != np.datetime64('NaT'))
 
+    def test_repr_generic_datetime(self):
+        # gh-11752: generic-unit datetime values must be printable.
+        # Print int64 ticks (like timedelta), not NaT — converting all
+        # generic values to NaT for display broke view round-trips.
+        assert_equal(repr(np.zeros(2, np.datetime64)),
+                     "array([0, 0], dtype=datetime64)")
+        assert_equal(repr(np.zeros(1, dtype=[('b', np.datetime64)])),
+                     "array([(0,)], dtype=[('b', '<M8')])")
+
+        # Non-zero ticks from a dtype view (not constructible via datetime64(int))
+        viewed = np.array([2], dtype=np.uint64).view(np.datetime64)
+        assert_equal(repr(viewed), "array([2], dtype=datetime64)")
+        assert_equal(str(viewed[0]), "2")
+        assert_equal(repr(viewed[0]), "np.datetime64(2,'generic')")
+
+        # NaT with generic units is unchanged
+        with pytest.warns(
+            DeprecationWarning,
+            match=self.generic_unit_deprecation_message,
+        ):
+            nat = np.datetime64('NaT')
+        assert_equal(repr(nat), "np.datetime64('NaT','generic')")
+        assert_equal(str(nat), "NaT")
+
     @pytest.mark.parametrize("size", [
         3, 21, 217, 1000])
     def test_datetime_nat_argsort_stability(self, size):

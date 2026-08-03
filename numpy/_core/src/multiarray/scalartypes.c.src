@@ -920,6 +920,36 @@ datetimetype_repr(PyObject *self)
 
     scal = (PyDatetimeScalarObject *)self;
 
+    /*
+     * Generic-unit non-NaT values cannot be converted to a datetimestruct
+     * (gh-11752).  Mirror timedelta and print the raw int64 tick count.
+     */
+    if (scal->obmeta.base == NPY_FR_GENERIC &&
+            scal->obval != NPY_DATETIME_NAT) {
+        PyObject *val;
+#if defined(HAVE_LONG_LONG)
+        val = PyUnicode_FromFormat("%lld", (long long)scal->obval);
+#else
+        val = PyUnicode_FromFormat("%ld", (long)scal->obval);
+#endif
+        if (val == NULL) {
+            return NULL;
+        }
+        int legacy_print_mode = get_legacy_print_mode();
+        if (legacy_print_mode == -1) {
+            Py_DECREF(val);
+            return NULL;
+        }
+        if (legacy_print_mode > 125) {
+            ret = PyUnicode_FromFormat("np.datetime64(%S,'generic')", val);
+        }
+        else {
+            ret = PyUnicode_FromFormat("numpy.datetime64(%S,'generic')", val);
+        }
+        Py_DECREF(val);
+        return ret;
+    }
+
     if (NpyDatetime_ConvertDatetime64ToDatetimeStruct(&scal->obmeta,
                 scal->obval, &dts) < 0) {
         return NULL;
@@ -1061,6 +1091,19 @@ datetimetype_str(PyObject *self)
     }
 
     scal = (PyDatetimeScalarObject *)self;
+
+    /*
+     * Generic-unit non-NaT values have no calendar representation (gh-11752).
+     * Print the raw int64 tick count, matching TimedeltaFormat / arrayprint.
+     */
+    if (scal->obmeta.base == NPY_FR_GENERIC &&
+            scal->obval != NPY_DATETIME_NAT) {
+#if defined(HAVE_LONG_LONG)
+        return PyUnicode_FromFormat("%lld", (long long)scal->obval);
+#else
+        return PyUnicode_FromFormat("%ld", (long)scal->obval);
+#endif
+    }
 
     if (NpyDatetime_ConvertDatetime64ToDatetimeStruct(&scal->obmeta, scal->obval,
                                                             &dts) < 0) {

@@ -390,13 +390,12 @@ class TestCasting:
             arr2[...] = np.datetime64("NaT", "D")
 
             if time_dt == np.dtype("M8"):
-                # This is a bit of a strange path, and could probably be removed
+                # Casting into generic-unit datetime succeeds; non-NaT values
+                # are printable as int64 ticks (gh-11752).
                 arr1[-1] = 0  # ensure at least one value is not NaT
 
-                # The cast currently succeeds, but the values are invalid:
                 cast._simple_strided_call((arr1, arr2))
-                with pytest.raises(ValueError):
-                    str(arr2[-1])  # e.g. conversion to string fails
+                assert str(arr2[-1]) == "0"
                 return
 
             cast._simple_strided_call((arr1, arr2))

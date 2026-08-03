@@ -1423,6 +1423,11 @@ class DatetimeFormat(_TimelikeFormat):
         return super().__call__(x)
 
     def _format_non_nat(self, x):
+        # Generic-unit datetimes have no calendar interpretation (gh-11752).
+        # Format the underlying int64 ticks like timedelta, instead of raising
+        # in datetime_as_string / convert_datetime_to_datetimestruct.
+        if self.unit == 'generic':
+            return str(x.astype('i8'))
         datetime_str = datetime_as_string(x,
                                           unit=self.unit,
                                           timezone=self.timezone,
