@@ -72,8 +72,20 @@ PY
 ensure_venv_and_deps() {
   git submodule update --init --recursive
 
-  if [[ ! -d .venv ]]; then
-    python3 -m venv .venv
+  # A stale/partial `.venv` dir (common after interrupted installs) has no activate.
+  if [[ ! -f .venv/bin/activate ]]; then
+    echo "Creating fresh Python venv..."
+    rm -rf .venv
+    if ! python3 -m venv .venv; then
+      echo "ERROR: python3 -m venv failed. Is python3-venv installed?" >&2
+      python3 -V >&2 || true
+      exit 1
+    fi
+  fi
+  if [[ ! -f .venv/bin/activate ]]; then
+    echo "ERROR: .venv/bin/activate missing after venv create" >&2
+    ls -la .venv >&2 || true
+    exit 1
   fi
   # shellcheck disable=SC1091
   source .venv/bin/activate
