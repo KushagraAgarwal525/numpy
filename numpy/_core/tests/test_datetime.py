@@ -1392,9 +1392,9 @@ class TestDateTime:
 
             assert_equal(b.astype(object).astype(unit), b,
                             f"Error roundtripping unit {unit}")
-        # With time units
-        for unit in ['M8[as]', 'M8[16fs]', 'M8[ps]', 'M8[us]',
-                     'M8[300as]', 'M8[20us]']:
+        # With time units that can span year-scale dates (gh-9956: finer
+        # units must not silently wrap when assigned out-of-range strings)
+        for unit in ['M8[us]', 'M8[20us]']:
             b = a.copy().view(dtype=unit)
             b[0] = '-0001-01-01T00'
             b[1] = '-0001-12-31T00'
@@ -1406,6 +1406,34 @@ class TestDateTime:
             b[7] = '10000-01-01T00'
             b[8] = 'NaT'
 
+            assert_equal(b.astype(object).astype(unit), b,
+                            f"Error roundtripping unit {unit}")
+        # Finer units only cover a small window around the epoch
+        for unit, dates in [
+            ('M8[ps]', [
+                '1969-12-31T00', '1969-12-31T23:59:59.999999',
+                '1970-01-01T00', '1970-01-01T00:00:00.000001',
+                '1970-04-01T00', 'NaT',
+            ]),
+            ('M8[16fs]', [
+                '1969-12-31T23:00', '1969-12-31T23:59:59.999999',
+                '1970-01-01T00', '1970-01-01T00:00:00.000001',
+                '1970-01-01T01:00', 'NaT',
+            ]),
+            ('M8[as]', [
+                '1969-12-31T23:59:55', '1969-12-31T23:59:59.999999',
+                '1970-01-01T00', '1970-01-01T00:00:00.000001',
+                '1970-01-01T00:00:05', 'NaT',
+            ]),
+            ('M8[300as]', [
+                '1969-12-31T23:59:55', '1969-12-31T23:59:59.999999',
+                '1970-01-01T00', '1970-01-01T00:00:00.000001',
+                '1970-01-01T00:00:05', 'NaT',
+            ]),
+        ]:
+            b = a.copy().view(dtype=unit)
+            for i, date in enumerate(dates):
+                b[i] = date
             assert_equal(b.astype(object).astype(unit), b,
                             f"Error roundtripping unit {unit}")
 
