@@ -2387,6 +2387,55 @@ class TestUfunc:
         np.power.at(a, [1, 2, 3, 2], 3.5)
         assert_equal(a, np.array([0, 1, 4414, 46, 4, 5, 6, 7, 8, 9]))
 
+    def test_ufunc_at_unaligned_structured_field(self):
+        # gh-13317: unaligned field views must not trip aligned casts in .at
+        # Structured itemsize 9 makes field 'b' (i4) unaligned for most elems.
+        y = np.array(
+            list(zip(np.arange(10), np.arange(10), np.ones(10, dtype='i1'))),
+            dtype=[('a', 'i4'), ('b', 'i4'), ('c', 'i1')],
+        )
+        vals = y['b']
+        assert not vals.flags.aligned
+        assert vals.strides[0] == y.dtype.itemsize
+
+        # Mixed dtypes force the casting/buffered slow path (original crash).
+        dest = np.zeros(10, dtype='i8')
+        idx = np.arange(10, dtype='i8')
+        np.add.at(dest, idx, vals)
+        assert_array_equal(dest, np.arange(10, dtype='i8'))
+
+        # Same-dtype unaligned values also take the slow path.
+        dest32 = np.zeros(10, dtype='i4')
+        np.add.at(dest32, idx.astype('i4'), vals)
+        assert_array_equal(dest32, np.arange(10, dtype='i4'))
+
+        # Unary .at on an unaligned destination (cast path via byte-swapped).
+        dest_be = np.arange(10, dtype=np.dtype('>i4'))
+        # Make an unaligned view of dest_be via a padded structured array.
+        padded = np.zeros(10, dtype=[('pad', 'i1'), ('x', dest_be.dtype)])
+        padded['x'] = dest_be
+        view = padded['x']
+        assert not view.flags.aligned
+        np.negative.at(view, idx.astype('i4'))
+        assert_array_equal(view, -np.arange(10, dtype=dest_be.dtype))
+
+    @pytest.mark.parametrize("ufunc", [np.add, np.subtract, np.maximum])
+    def test_ufunc_at_unaligned_cast_matches_loop(self, ufunc):
+        # Compare .at against an elementwise reference for unaligned values.
+        y = np.zeros(20, dtype=[('a', 'i4'), ('b', 'i4'), ('c', 'i1')])
+        y['b'] = np.arange(20, dtype='i4')
+        vals = y['b']
+        assert not vals.flags.aligned
+
+        dest = np.arange(20, dtype='i8') * 3
+        idx = np.arange(20, dtype=np.intp)
+        expected = dest.copy()
+        for i, v in zip(idx, vals):
+            ufunc(expected[i], v, out=expected[i:i + 1], casting="unsafe")
+
+        ufunc.at(dest, idx, vals)
+        assert_array_equal(dest, expected)
+
     def test_ufunc_at_boolean(self):
         # Test boolean indexing and boolean ufuncs
         a = np.arange(10)

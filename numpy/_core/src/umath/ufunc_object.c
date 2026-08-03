@@ -6061,6 +6061,21 @@ new_array_op(PyArrayObject *op_array, char *data)
     PyObject *r = PyArray_NewFromDescr(&PyArray_Type, PyArray_DESCR(op_array),
                                        1, dims, NULL, data,
                                        NPY_ARRAY_WRITEABLE, NULL);
+    if (r == NULL) {
+        return NULL;
+    }
+    /*
+     * These 1-element views have their data pointers swapped via
+     * NpyIter_ResetBasePointers on each ufunc.at iteration.  If the
+     * original array is unaligned (e.g. a structured-dtype field view
+     * whose itemsize is not a multiple of the field alignment), later
+     * elements may be unaligned even when the first happened to be
+     * aligned.  Clear ALIGNED so the buffered cast uses an
+     * unaligned-safe transfer (gh-13317).
+     */
+    if (!PyArray_ISALIGNED(op_array)) {
+        PyArray_CLEARFLAGS((PyArrayObject *)r, NPY_ARRAY_ALIGNED);
+    }
     return (PyArrayObject *)r;
 }
 
