@@ -3555,12 +3555,35 @@ static PyObject *
         return robj;
     }
 
+    /*
+     * float64 inherits from Python float, so construction above goes through
+     * __float__ via PyFloat_Type.tp_new. Other floating scalars do not.
+     * For ndarray subclasses with a custom __float__ (notably MaskedArray),
+     * prefer that over casting the raw buffer so e.g. np.float16(np.ma.masked)
+     * returns nan like np.float64(np.ma.masked) (gh-9760).
+     */
+#if defined(_@TYPE@_IS_HALF) || defined(_@TYPE@_IS_FLOAT) || defined(_@TYPE@_IS_LONGDOUBLE)
+    PyObject *float_obj = NULL;
+    if (PyArray_Check(obj) && !PyArray_CheckExact(obj)) {
+        float_obj = PyNumber_Float(obj);
+        if (float_obj == NULL) {
+            PyErr_Clear();
+        }
+        else {
+            obj = float_obj;
+        }
+    }
+#endif
+
     /* PyArray_FromAny steals a reference, reclaim it before it's gone */
     Py_INCREF(typecode);
     PyArrayObject *arr = (PyArrayObject *)PyArray_FromAny(
             obj, typecode, 0, 0, NPY_ARRAY_FORCECAST, NULL);
 #if defined(_@TYPE@_IS_CDOUBLE) || defined(_@TYPE@_IS_CFLOAT)
     Py_DECREF(obj);
+#endif
+#if defined(_@TYPE@_IS_HALF) || defined(_@TYPE@_IS_FLOAT) || defined(_@TYPE@_IS_LONGDOUBLE)
+    Py_XDECREF(float_obj);
 #endif
     if (arr == NULL) {
         Py_DECREF(typecode);
