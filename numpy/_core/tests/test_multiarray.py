@@ -1857,6 +1857,45 @@ class TestStructured:
         assert scalar.flags.owndata
         assert np.asarray(scalar).base is None
 
+    def test_gapped_structured_scalar_assign_ignores_padding(self):
+        # gh-29720: assigning a 0-d array with a gapped structured dtype must
+        # copy fields only. memcpy of the whole itemsize would write padding
+        # into neighboring fields when the dtype is a view onto a denser layout.
+        gapped = np.dtype({
+            'names': ['f1'], 'formats': ['?'], 'offsets': [1], 'itemsize': 4,
+        })
+        # Dirty padding around the single field (same descr object as the view).
+        src_buf = bytearray([0xFF, 0x00, 0xAA, 0x55])
+        src = np.ndarray((), dtype=gapped, buffer=src_buf)
+        src['f1'] = True
+
+        expected = np.array(
+            [(False, True, False, False), (False, False, False, False)],
+            dtype='?,?,?,?',
+        )
+
+        dest = np.zeros(2, dtype='?,?,?,?')
+        dest.view(gapped)[0] = src
+        assert_array_equal(dest, expected)
+        assert_array_equal(dest.view(np.uint8), [0, 1, 0, 0, 0, 0, 0, 0])
+
+        # Slice assignment and void-scalar assignment already field-copied;
+        # keep them correct and consistent with the integer-index path.
+        dest = np.zeros(2, dtype='?,?,?,?')
+        dest.view(gapped)[:1] = src
+        assert_array_equal(dest, expected)
+
+        dest = np.zeros(2, dtype='?,?,?,?')
+        dest.view(gapped)[0] = src[()]
+        assert_array_equal(dest, expected)
+
+        # Packed same-dtype assign may still memcpy (trivially copyable).
+        packed = np.dtype([('a', '?'), ('b', '?'), ('c', '?'), ('d', '?')])
+        src_packed = np.array((True, False, True, False), dtype=packed)
+        dest_packed = np.zeros(1, dtype=packed)
+        dest_packed[0] = src_packed
+        assert_array_equal(dest_packed, np.array(src_packed))
+
 class TestBool:
     def test_test_interning(self):
         a0 = np.bool(0)

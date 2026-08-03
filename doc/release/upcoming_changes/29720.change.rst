@@ -1,0 +1,5 @@
+* Assignment of 0-d arrays with structured dtypes that contain padding
+  (gaps between fields) now copies fields only, matching void-scalar and
+  slice assignment. Previously, integer-index assignment could ``memcpy``
+  padding bytes into neighboring memory when the dtype was a view onto a
+  denser layout (gh-29720).
