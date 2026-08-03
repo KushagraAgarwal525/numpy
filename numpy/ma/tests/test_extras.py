@@ -686,6 +686,18 @@ class TestCompressFunctions:
         a2 = compress_nd(x, (0, -1))
         assert_equal(a, a2)
 
+    def test_compress_nd_fully_masked(self):
+        # Regression test for gh-13709: fully masked input must keep the
+        # shape of axes that were not suppressed (not collapse to 1-D empty).
+        x = masked_all((3, 3, 2))
+        assert_equal(compress_nd(x, axis=(0, 1)).shape, (0, 0, 2))
+        assert_equal(compress_nd(x, axis=0).shape, (0, 3, 2))
+        assert_equal(compress_nd(x, axis=1).shape, (3, 0, 2))
+        assert_equal(compress_nd(x, axis=2).shape, (3, 3, 0))
+        assert_equal(compress_nd(x).shape, (0, 0, 0))
+        # Dtype is preserved
+        assert_equal(compress_nd(x, axis=(0, 1)).dtype, x.dtype)
+
     def test_compress_rowcols(self):
         # Tests compress_rowcols
         x = array(np.arange(9).reshape(3, 3),
