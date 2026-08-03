@@ -2649,6 +2649,11 @@ def _arraymethod(funcname, onmask=True):
         elif mask is not nomask:
             # __setmask__ makes a copy, which we don't want
             result._mask = getattr(mask, funcname)(*args, **params)
+        # Methods that always allocate a new mask must not keep the
+        # source's sharedmask=True (gh-7210). View-like methods
+        # (transpose, squeeze, ...) correctly retain sharing.
+        if funcname in ('copy', 'flatten', 'repeat'):
+            result._sharedmask = False
         return result
     methdoc = getattr(ndarray, funcname, None) or getattr(np, funcname, None)
     if methdoc is not None:
@@ -3116,6 +3121,10 @@ class MaskedArray(ndarray):
                     order = "K"
 
                 _mask = _mask.astype(_mask_dtype, order)
+                # Mask was copied (e.g. via .copy()/empty_like); it is no
+                # longer shared with obj. Clear the flag inherited above.
+                # See gh-7210.
+                self._sharedmask = False
             else:
                 # Take a view so shape changes, etc., do not propagate back.
                 _mask = _mask.view()
