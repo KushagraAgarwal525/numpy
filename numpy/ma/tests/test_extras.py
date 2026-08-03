@@ -1550,6 +1550,18 @@ class TestArraySetOps:
         assert_equal(test[1], [0])
         assert_equal(test[2], [0])
 
+    def test_unique_uint8_fill_value_collision(self):
+        # Regression test for gh-14804: default fill_value 999999 wraps to
+        # 63 for uint8, so sorting-based unique must not fill masked values.
+        m = masked_array(np.array([50, 255, 1, 255, 1], dtype=np.uint8),
+                         mask=[False, False, True, False, True])
+        test = unique(m, return_index=True, return_inverse=True)
+        assert_equal(test[0], masked_array([50, 255, 1],
+                                           mask=[False, False, True],
+                                           dtype=np.uint8))
+        assert_equal(test[1], [0, 1, 2])
+        assert_equal(test[2], [0, 1, 2, 1, 2])
+
     def test_ediff1d(self):
         # Tests mediff1d
         x = masked_array(np.arange(5), mask=[1, 0, 0, 0, 1])
