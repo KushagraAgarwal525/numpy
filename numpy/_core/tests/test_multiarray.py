@@ -2490,14 +2490,13 @@ class TestMethods:
             assert_array_equal(sorted_b['f'], expected['f'].astype(a.dtype))
             assert_array_equal(np.argsort(b), [1, 0])
 
-        # Nested subarray shape, still C-order elementwise
+        # Nested 2-D subarray shape, still C-order elementwise
         a = np.array(
-            [[[[3, 1], [0, 0]]], [[[2, 9], [0, 0]]]],
-            dtype=np.int16,
+            [([[3, 1], [0, 0]],), ([[2, 9], [0, 0]],)],
+            dtype=[('f', 'i2', (2, 2))],
         )
-        b = a.view([('f', (a.dtype, (2, 2)))]).reshape(2)
-        assert_array_equal(np.argsort(b), [1, 0])
-        assert_array_equal(np.sort(b)['f'][:, 0, 0], [2, 3])
+        assert_array_equal(np.argsort(a), [1, 0])
+        assert_array_equal(np.sort(a)['f'][:, 0, 0], [2, 3])
 
     def test_sort_raises(self):
         # gh-9404
