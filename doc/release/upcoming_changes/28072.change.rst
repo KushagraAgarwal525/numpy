@@ -1,0 +1,9 @@
+Dtype comparisons with unsized flexible types are no longer both ``<`` and ``>``
+--------------------------------------------------------------------------------
+Comparing an unsized flexible dtype such as ``dtype("S")`` / ``dtype("S0")``
+(or ``"U"`` / ``"V"``) with a sized dtype of the same kind previously returned
+``True`` for both ``<`` and ``>``, because each could safely cast to the other.
+Ordered comparisons now require one-way casting, so such pairs are treated as
+incomparable (all of ``<``, ``>``, ``<=``, and ``>=`` are ``False`` when the
+dtypes are not equivalent).  Comparisons between sized flexible dtypes and
+between numeric dtypes are unchanged.
