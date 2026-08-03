@@ -76,6 +76,7 @@ class SeedSequence(_GenerateStateMixin, ISpawnableSeedSequence):
     pool_size: int
     n_children_spawned: int
     pool: NDArray[np.uint32]
+    lock: Lock
 
     def __init__(
         self,
@@ -89,7 +90,9 @@ class SeedSequence(_GenerateStateMixin, ISpawnableSeedSequence):
     def spawn(self, /, n_children: int) -> list[Self]: ...
     @property
     def state(self) -> _SeedSeqState: ...
-
+    def __getstate__(self) -> _SeedSeqState: ...
+    def __setstate__(self, state: _SeedSeqState, /) -> None: ...
+    def __reduce_ex__(self, protocol: int, /) -> tuple[Any, ...]: ...
 class BitGenerator(_CythonMixin, abc.ABC):
     lock: Lock
     @property

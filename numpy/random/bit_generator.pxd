@@ -26,6 +26,9 @@ cdef class SeedSequence():
     cdef readonly Py_ssize_t pool_size
     cdef readonly object pool
     cdef readonly uint32_t n_children_spawned
+    # Per-instance lock so concurrent spawn() calls cannot hand out duplicate
+    # spawn keys (gh-32063). Not part of the pickled state; recreated on init.
+    cdef readonly object lock
 
     cdef mix_entropy(self, np.ndarray[np.npy_uint32, ndim=1] mixer,
                      np.ndarray[np.npy_uint32, ndim=1] entropy_array)

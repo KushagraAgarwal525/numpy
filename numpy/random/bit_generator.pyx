@@ -305,6 +305,10 @@ cdef class SeedSequence:
     True
     """
 
+    def __cinit__(self):
+        # Always create a fresh lock; never pickled (see __reduce_ex__).
+        self.lock = RLock()
+
     def __init__(self, entropy=None, *, spawn_key=(),
                  pool_size=DEFAULT_POOL_SIZE, n_children_spawned=0):
         if pool_size < DEFAULT_POOL_SIZE:
@@ -340,6 +344,28 @@ cdef class SeedSequence:
         lines.append(')')
         text = '\n'.join(lines)
         return text
+
+    def __getstate__(self):
+        # Exclude the unpickleable/non-semantic lock; a fresh lock is created
+        # in __cinit__ on the reconstituted instance.
+        return self.state
+
+    def __setstate__(self, state):
+        self.__init__(
+            state['entropy'],
+            spawn_key=state['spawn_key'],
+            pool_size=state['pool_size'],
+            n_children_spawned=state['n_children_spawned'],
+        )
+
+    def __reduce_ex__(self, protocol):
+        # Custom reduce so Cython does not attempt to pickle the RLock.
+        from ._pickle import __seed_sequence_ctor
+        return (
+            __seed_sequence_ctor,
+            (self.entropy, self.spawn_key, self.pool_size,
+             self.n_children_spawned),
+        )
 
     @property
     def state(self):
@@ -484,19 +510,24 @@ cdef class SeedSequence:
 
         """
         cdef uint32_t i
+        cdef uint32_t start
 
         if n_children < 0:
             raise ValueError("n_children must be non-negative")
 
-        seqs = []
-        for i in range(self.n_children_spawned,
-                       self.n_children_spawned + n_children):
-            seqs.append(type(self)(
-                self.entropy,
-                spawn_key=self.spawn_key + (i,),
-                pool_size=self.pool_size,
-            ))
-        self.n_children_spawned += n_children
+        # Serialize the read-modify-write of n_children_spawned so concurrent
+        # spawn() callers cannot observe the same starting index and produce
+        # identical spawn_key values (gh-32063).
+        with self.lock:
+            start = self.n_children_spawned
+            seqs = []
+            for i in range(start, start + n_children):
+                seqs.append(type(self)(
+                    self.entropy,
+                    spawn_key=self.spawn_key + (i,),
+                    pool_size=self.pool_size,
+                ))
+            self.n_children_spawned = start + n_children
         return seqs
 
 
@@ -547,6 +578,15 @@ cdef class BitGenerator:
         if not isinstance(seed, ISeedSequence):
             seed = SeedSequence(seed)
         self._seed_seq = seed
+
+    def _share_lock(self, lock):
+        """
+        Replace this BitGenerator's lock with `lock`.
+
+        Used by `RandomState` / `set_bit_generator` so the singleton can keep a
+        stable lock object identity across bit-generator swaps (gh-32063).
+        """
+        self.lock = lock
 
     # Pickling support:
     def __getstate__(self):

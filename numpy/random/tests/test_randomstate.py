@@ -1,6 +1,7 @@
 import hashlib
 import pickle
 import sys
+import threading
 import warnings
 
 import pytest
@@ -2105,3 +2106,53 @@ def test_swapped_singleton_against_direct(restore_singleton_bitgen):
     rg = np.random.RandomState(PCG64(98765))
     non_singleton_vals = rg.randint(0, 2 ** 30, 10)
     assert_equal(non_singleton_vals, singleton_vals)
+
+
+@pytest.mark.thread_unsafe(reason="np.random.set_bit_generator affects global state")
+def test_set_bit_generator_preserves_lock_identity(restore_singleton_bitgen):
+    # gh-32063: lock object identity must stay stable across swaps so waiters
+    # that already captured the lock remain synchronized with the new bitgen.
+    old_bg = np.random.get_bit_generator()
+    old_lock = old_bg.lock
+    bg = PCG64(0)
+    assert bg.lock is not old_lock
+    np.random.set_bit_generator(bg)
+    assert np.random.get_bit_generator() is bg
+    assert bg.lock is old_lock
+    # Generator sharing the singleton bitgen must use the same lock.
+    gen = np.random.Generator(np.random.get_bit_generator())
+    assert gen.bit_generator.lock is old_lock
+
+
+@pytest.mark.skipif(IS_WASM, reason="can't start thread")
+@pytest.mark.thread_unsafe(reason="np.random.set_bit_generator affects global state")
+def test_set_bit_generator_concurrent_draws(restore_singleton_bitgen):
+    # gh-32063: swapping the singleton bit generator while draws are in flight
+    # must not segfault or hang.
+    barrier = threading.Barrier(2)
+    stop = threading.Event()
+    errors = []
+
+    def draw():
+        try:
+            barrier.wait()
+            while not stop.is_set():
+                np.random.random(10_000)
+        except Exception as exc:  # pragma: no cover - unexpected
+            errors.append(exc)
+
+    def swap():
+        try:
+            barrier.wait()
+            for i in range(200):
+                bg = PCG64(i) if i % 2 else MT19937(i)
+                np.random.set_bit_generator(bg)
+        finally:
+            stop.set()
+
+    threads = [threading.Thread(target=draw), threading.Thread(target=swap)]
+    for t in threads:
+        t.start()
+    for t in threads:
+        t.join()
+    assert errors == []
