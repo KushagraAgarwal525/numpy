@@ -902,7 +902,9 @@ class _DomainSafeDivide:
         # import times. The calculation of these parameters is a substantial
         # component of numpy's import time.
         if self.tolerance is None:
-            self.tolerance = np.finfo(float).tiny
+            # Use 1/max so we only flag true float overflow of a/b, not the
+            # much smaller 1/tiny threshold (see gh-22347).
+            self.tolerance = 1.0 / np.finfo(float).max
         # don't call ma ufuncs from __array_wrap__ which would fail for scalars
         a, b = np.asarray(a), np.asarray(b)
         with np.errstate(all='ignore'):

@@ -1220,7 +1220,27 @@ class TestMaskedArrayArithmetic:
         tiny = np.finfo(float).tiny
         a = array([tiny, 1. / tiny, 0.])
         assert_equal(getmaskarray(a / 2), [0, 0, 0])
-        assert_equal(getmaskarray(2 / a), [1, 0, 1])
+        # 2/tiny is finite (~9e307); only div-by-zero / true overflow mask
+        assert_equal(getmaskarray(2 / a), [0, 0, 1])
+
+    def test_safe_divide_large_float64(self):
+        # gh-22347: large but finite float64 results must not be masked
+        maxf = np.finfo(float).max
+        a = array([maxf], dtype=float)
+        result = a / 2
+        assert_equal(getmaskarray(result), [0])
+        assert_almost_equal(result, [maxf / 2])
+        # true overflow still masks via non-finite result
+        with np.errstate(over='ignore'):
+            overflow = a / 0.5
+        assert_equal(getmaskarray(overflow), [1])
+        # mean of a large unmasked column must remain unmasked
+        X = array([[np.nan, 6.10351562e-05],
+                   [1.0, maxf]])
+        X = masked_array(X, mask=np.isnan(X))
+        mean = X.mean(axis=0)
+        assert_equal(getmaskarray(mean), [0, 0])
+        assert_almost_equal(mean[-1], (6.10351562e-05 + maxf) / 2)
 
     def test_masked_singleton_arithmetic(self):
         # Tests some scalar arithmetic on MaskedArrays.
