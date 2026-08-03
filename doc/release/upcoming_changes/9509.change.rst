@@ -1,0 +1,7 @@
+``np.digitize`` supports non-float64 bin dtypes
+-----------------------------------------------
+The internal monotonicity check used by ``np.digitize`` no longer casts bin
+edges to ``float64``. This allows ``longdouble`` / ``float128``,
+``datetime64``, ``timedelta64``, and large integers beyond the float64
+mantissa to be digitized correctly (previously these could raise or return
+wrong indices).
