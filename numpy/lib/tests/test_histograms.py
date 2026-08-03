@@ -429,6 +429,31 @@ class TestHistogram:
         assert edges[0] == Z[0]
         assert edges[-1] == Z[-1]
 
+    def test_gh_8203_fd_tiny_iqr(self):
+        """
+        Freedman-Diaconis with a tiny nonzero IQR must not request
+        astronomical bin counts (MemoryError / multi-PiB linspace).
+        """
+        x = np.array([2, 2, 2 - 1e-15, 2 - 1e-15, 1], dtype=np.float64)
+        counts, edges = np.histogram(x, bins='fd')
+        assert len(counts) < 100
+        assert edges[0] == x.min()
+        assert edges[-1] == x.max()
+        # Same safeguard for histogram_bin_edges
+        edges_only = histogram_bin_edges(x, bins='fd')
+        assert_array_equal(edges_only, edges)
+
+    @pytest.mark.parametrize("estimator", [
+        'fd', 'scott', 'doane', 'stone', 'auto', 'rice', 'sturges', 'sqrt'])
+    def test_gh_8203_estimators_bounded(self, estimator):
+        """Automatic estimators stay within the safety bin-count cap."""
+        x = np.array([2, 2, 2 - 1e-15, 2 - 1e-15, 1], dtype=np.float64)
+        counts, edges = np.histogram(x, bins=estimator)
+        assert len(counts) <= max(100, int(np.sqrt(x.size)))
+        assert edges[0] == x.min()
+        assert edges[-1] == x.max()
+
+
 class TestHistogramOptimBinNums:
     """
     Provide test coverage when using provided estimators for optimal number of

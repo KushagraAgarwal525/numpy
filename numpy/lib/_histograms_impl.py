@@ -212,6 +212,12 @@ def _hist_bin_fd(x, range):
     Binwidth is inversely proportional to the cube root of data size
     (asymptotically optimal).
 
+    A tiny nonzero IQR (for example from floating-point noise) can
+    otherwise request astronomically many bins. When the FD width is
+    positive but smaller than half the square-root rule width, it is
+    floored to that value — the same safeguard used by ``auto``
+    (see gh-8203, gh-28400).
+
     Parameters
     ----------
     x : array_like
@@ -222,9 +228,13 @@ def _hist_bin_fd(x, range):
     -------
     h : An estimate of the optimal bin width for the given data.
     """
-    del range  # unused
     iqr = np.subtract(*np.percentile(x, [75, 25]))
-    return 2.0 * iqr * x.size ** (-1.0 / 3.0)
+    fd_bw = 2.0 * iqr * x.size ** (-1.0 / 3.0)
+    if fd_bw != 0:
+        # Keep IQR==0 → width 0 (one bin). Floor only pathological
+        # tiny-but-nonzero widths so linspace cannot OOM (gh-8203).
+        fd_bw = max(fd_bw, _hist_bin_sqrt(x, range) / 2)
+    return fd_bw
 
 
 def _hist_bin_auto(x, range):
@@ -256,10 +266,12 @@ def _hist_bin_auto(x, range):
     --------
     _hist_bin_fd, _hist_bin_sturges
     """
+    # `_hist_bin_fd` already floors tiny positive widths with sqrt/2;
+    # re-apply when FD returns 0 (IQR==0) so auto still gets a
+    # variance-aware lower bound instead of collapsing to one bin.
     fd_bw = _hist_bin_fd(x, range)
     sturges_bw = _hist_bin_sturges(x, range)
     sqrt_bw = _hist_bin_sqrt(x, range)
-    # heuristic to limit the maximal number of bins
     fd_bw_corrected = max(fd_bw, sqrt_bw / 2)
     return min(fd_bw_corrected, sturges_bw)
 
@@ -412,6 +424,21 @@ def _get_bin_edges(a, bins, range, weights):
                 # Width can be zero for some estimators, e.g. FD when
                 # the IQR of the data is zero.
                 n_equal_bins = 1
+
+            # Last-resort cap for automatic estimators (gh-8203). Never
+            # tighter than the size-based estimators / stone's search
+            # bound / 10× Sturges (the auto heuristic from gh-28400), so
+            # well-behaved data is unchanged while pathological
+            # variance-based widths cannot allocate petabytes.
+            sturges_bins = int(np.ceil(np.log2(a.size) + 1.0))
+            max_auto_bins = max(
+                int(np.ceil(np.sqrt(a.size))),
+                int(np.ceil(2.0 * a.size ** (1.0 / 3.0))),
+                max(100, int(np.sqrt(a.size))),
+                10 * sturges_bins,
+            )
+            if n_equal_bins > max_auto_bins:
+                n_equal_bins = max_auto_bins
 
     elif np.ndim(bins) == 0:
         try:
