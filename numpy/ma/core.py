@@ -2649,6 +2649,14 @@ def _arraymethod(funcname, onmask=True):
         elif mask is not nomask:
             # __setmask__ makes a copy, which we don't want
             result._mask = getattr(mask, funcname)(*args, **params)
+        # Methods that allocate a new array must not share the source
+        # fill_value 0-d array; otherwise set_fill_value on the copy
+        # mutates the original (gh-7329). View-like methods
+        # (transpose, squeeze, ...) correctly retain sharing.
+        if funcname in ('copy', 'flatten', 'repeat'):
+            fill_value = getattr(result, '_fill_value', None)
+            if fill_value is not None:
+                result._fill_value = fill_value.copy()
         return result
     methdoc = getattr(ndarray, funcname, None) or getattr(np, funcname, None)
     if methdoc is not None:
