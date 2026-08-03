@@ -1,0 +1,9 @@
+``histogram`` automatic bin estimators no longer OOM on tiny widths
+-------------------------------------------------------------------
+``numpy.histogram`` and ``numpy.histogram_bin_edges`` with automatic
+string estimators such as ``bins='fd'`` no longer attempt to allocate
+astronomical numbers of bins when a variance-based width estimate is a
+tiny nonzero value (for example from floating-point noise). When the
+estimated bin count exceeds a size-based safety limit (never tighter
+than the square-root, Rice, Stone, or 10× Sturges bounds), the
+estimator falls back to Sturges before edges are materialized.

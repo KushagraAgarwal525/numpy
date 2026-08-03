@@ -413,6 +413,33 @@ def _get_bin_edges(a, bins, range, weights):
                 # the IQR of the data is zero.
                 n_equal_bins = 1
 
+            # Last-resort guard for automatic estimators (gh-8203). Never
+            # tighter than the size-based estimators / stone's search
+            # bound / 10× Sturges (the auto heuristic from gh-28400), so
+            # well-behaved FD/Scott/Doane results (including intentional
+            # sparse bins from outliers) are unchanged. Pathological
+            # tiny widths fall back to Sturges instead of allocating
+            # petabytes in linspace.
+            sturges_bins = int(np.ceil(np.log2(a.size) + 1.0))
+            max_auto_bins = max(
+                int(np.ceil(np.sqrt(a.size))),
+                int(np.ceil(2.0 * a.size ** (1.0 / 3.0))),
+                max(100, int(np.sqrt(a.size))),
+                10 * sturges_bins,
+            )
+            if n_equal_bins > max_auto_bins:
+                sturges_width = _hist_bin_sturges(
+                    a, (first_edge, last_edge))
+                if sturges_width:
+                    delta = _unsigned_subtract(last_edge, first_edge)
+                    n_equal_bins = int(np.ceil(delta / sturges_width))
+                else:
+                    n_equal_bins = 1
+                # Sturges is size-only and within max_auto_bins, but keep
+                # the clamp for defense in depth.
+                if n_equal_bins > max_auto_bins:
+                    n_equal_bins = max_auto_bins
+
     elif np.ndim(bins) == 0:
         try:
             n_equal_bins = operator.index(bins)
