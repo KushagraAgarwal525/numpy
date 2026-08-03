@@ -508,8 +508,15 @@ PyArray_Pack(PyArray_Descr *descr, void *item, PyObject *value)
         Py_DECREF(DType);
 
         PyArrayObject *arr = (PyArrayObject *)value;
-        if (PyArray_DESCR(arr) == descr && !PyDataType_REFCHK(descr)) {
-            /* light-weight fast-path for when the descrs obviously matches */
+        /*
+         * Light-weight fast-path when the descriptors obviously match.
+         * Skip memcpy for structured dtypes with gaps/padding: those are
+         * marked NPY_NOT_TRIVIALLY_COPYABLE so field-by-field transfer is
+         * required (otherwise padding bytes clobber neighboring memory when
+         * the dtype is a view onto a denser layout). See gh-29720.
+         */
+        if (PyArray_DESCR(arr) == descr &&
+                PyDataType_ISTRIVIALLYCOPYABLE(descr)) {
             memcpy(item, PyArray_BYTES(arr), descr->elsize);
             return 0;  /* success (it was an array-like) */
         }
