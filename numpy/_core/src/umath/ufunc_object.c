@@ -6057,25 +6057,30 @@ static inline PyArrayObject *
 new_array_op(PyArrayObject *op_array, char *data)
 {
     npy_intp dims[1] = {1};
-    Py_INCREF(PyArray_DESCR(op_array));  /* NewFromDescr steals a reference */
-    PyObject *r = PyArray_NewFromDescr(&PyArray_Type, PyArray_DESCR(op_array),
-                                       1, dims, NULL, data,
-                                       NPY_ARRAY_WRITEABLE, NULL);
-    if (r == NULL) {
-        return NULL;
-    }
+    char *init_data = data;
+
     /*
-     * These 1-element views have their data pointers swapped via
-     * NpyIter_ResetBasePointers on each ufunc.at iteration.  If the
-     * original array is unaligned (e.g. a structured-dtype field view
-     * whose itemsize is not a multiple of the field alignment), later
-     * elements may be unaligned even when the first happened to be
-     * aligned.  Clear ALIGNED so the buffered cast uses an
-     * unaligned-safe transfer (gh-13317).
+     * These 1-element views have their iterator data pointers swapped via
+     * NpyIter_ResetBasePointers on each ufunc.at iteration.  Transfer
+     * functions are chosen with IsUintAligned() on this view; because the
+     * shape is 1 that check ignores strides and only looks at DATA.  If the
+     * first element of an unaligned source (e.g. a structured field view)
+     * happens to be aligned, an aligned cast is selected and later
+     * unaligned elements abort in debug builds (gh-13317).
+     *
+     * Force DATA to look unaligned when the source is unaligned so the
+     * buffered cast uses an unaligned-safe transfer.  With DELAY_BUFALLOC,
+     * the iterator never reads through this initial DATA; ResetBasePointers
+     * installs the real pointers before the first buffer copy.
      */
     if (!PyArray_ISALIGNED(op_array)) {
-        PyArray_CLEARFLAGS((PyArrayObject *)r, NPY_ARRAY_ALIGNED);
+        init_data = (char *)(((npy_uintp)data) ^ (npy_uintp)1);
     }
+
+    Py_INCREF(PyArray_DESCR(op_array));  /* NewFromDescr steals a reference */
+    PyObject *r = PyArray_NewFromDescr(&PyArray_Type, PyArray_DESCR(op_array),
+                                       1, dims, NULL, init_data,
+                                       NPY_ARRAY_WRITEABLE, NULL);
     return (PyArrayObject *)r;
 }
 

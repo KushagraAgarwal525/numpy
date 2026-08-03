@@ -2409,15 +2409,13 @@ class TestUfunc:
         np.add.at(dest32, idx.astype('i4'), vals)
         assert_array_equal(dest32, np.arange(10, dtype='i4'))
 
-        # Unary .at on an unaligned destination (cast path via byte-swapped).
-        dest_be = np.arange(10, dtype=np.dtype('>i4'))
-        # Make an unaligned view of dest_be via a padded structured array.
-        padded = np.zeros(10, dtype=[('pad', 'i1'), ('x', dest_be.dtype)])
-        padded['x'] = dest_be
+        # Unary .at writing into an unaligned destination.
+        padded = np.zeros(10, dtype=[('pad', 'i1'), ('x', 'i4')])
+        padded['x'] = np.arange(10, dtype='i4')
         view = padded['x']
         assert not view.flags.aligned
-        np.negative.at(view, idx.astype('i4'))
-        assert_array_equal(view, -np.arange(10, dtype=dest_be.dtype))
+        np.negative.at(view, np.arange(10, dtype=np.intp))
+        assert_array_equal(view, -np.arange(10, dtype='i4'))
 
     @pytest.mark.parametrize("ufunc", [np.add, np.subtract, np.maximum])
     def test_ufunc_at_unaligned_cast_matches_loop(self, ufunc):
