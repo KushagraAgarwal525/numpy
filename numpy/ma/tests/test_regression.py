@@ -50,6 +50,28 @@ class TestRegression:
         a.fill_value = 'X'
         assert_(a.fill_value == 'X')
 
+    def test_set_fill_value_longer_string(self):
+        # gh-9051: setting a longer fill_value must not truncate when the
+        # new value still fits in the array dtype.
+        m = np.ma.MaskedArray(['abcde'], mask=True)
+        assert_(m.fill_value == 'N/A')
+        m.fill_value = '-----'
+        assert_(m.fill_value == '-----')
+        assert_array_equal(m.filled(), np.array(['-----']))
+
+        b = np.ma.MaskedArray([b'abcde'], mask=True)
+        assert_(b.fill_value == b'N/A')
+        b.fill_value = b'-----'
+        assert_(b.fill_value == b'-----')
+        assert_array_equal(b.filled(), np.array([b'-----']))
+
+        # Legacy narrow fill storage (pre-fix default <U3) must still grow.
+        legacy = np.ma.MaskedArray(['abcde'], mask=True)
+        legacy._fill_value = np.array('N/A')  # <U3
+        legacy.fill_value = '-----'
+        assert_(legacy.fill_value == '-----')
+        assert_array_equal(legacy.filled(), np.array(['-----']))
+
     def test_var_sets_maskedarray_scalar(self):
         # Issue gh-2757
         a = np.ma.array(np.arange(5), mask=True)
