@@ -1054,16 +1054,29 @@ PyArray_NewLikeArrayWithShape(PyArrayObject *prototype, NPY_ORDER order,
             break;
     }
 
+    /*
+     * Preserve intentionally empty string dtypes (S0/U0).  NewFromDescr
+     * normally promotes them to length 1, which is wrong when cloning an
+     * existing empty-string array (copy / empty_like).  See gh-27301.
+     */
+    _NPY_CREATION_FLAGS cflags = 0;
+    if (PyDataType_ISSTRING(descr) && descr->elsize == 0) {
+        cflags |= _NPY_ARRAY_ALLOW_EMPTY_STRING;
+    }
+
     /* If it's not KEEPORDER, this is simple */
     if (order != NPY_KEEPORDER) {
-        ret = PyArray_NewFromDescr(subok ? Py_TYPE(prototype) : &PyArray_Type,
-                                        descr,
-                                        ndim,
-                                        dims,
-                                        NULL,
-                                        NULL,
-                                        order,
-                                        subok ? (PyObject *)prototype : NULL);
+        ret = PyArray_NewFromDescr_int(
+                subok ? Py_TYPE(prototype) : &PyArray_Type,
+                descr,
+                ndim,
+                dims,
+                NULL,
+                NULL,
+                order,
+                subok ? (PyObject *)prototype : NULL,
+                NULL,
+                cflags);
     }
     /* KEEPORDER needs some analysis of the strides */
     else {
@@ -1077,7 +1090,8 @@ PyArray_NewLikeArrayWithShape(PyArrayObject *prototype, NPY_ORDER order,
 
         /* Build the new strides */
         stride = descr->elsize;
-        if (stride == 0 && PyDataType_ISSTRING(descr)) {
+        if (stride == 0 && PyDataType_ISSTRING(descr) &&
+                !(cflags & _NPY_ARRAY_ALLOW_EMPTY_STRING)) {
             /* Special case for dtype=str or dtype=bytes. */
             if (descr->type_num == NPY_STRING) {
                 /* dtype is bytes */
@@ -1095,14 +1109,17 @@ PyArray_NewLikeArrayWithShape(PyArrayObject *prototype, NPY_ORDER order,
         }
 
         /* Finally, allocate the array */
-        ret = PyArray_NewFromDescr(subok ? Py_TYPE(prototype) : &PyArray_Type,
-                                        descr,
-                                        ndim,
-                                        dims,
-                                        strides,
-                                        NULL,
-                                        0,
-                                        subok ? (PyObject *)prototype : NULL);
+        ret = PyArray_NewFromDescr_int(
+                subok ? Py_TYPE(prototype) : &PyArray_Type,
+                descr,
+                ndim,
+                dims,
+                strides,
+                NULL,
+                0,
+                subok ? (PyObject *)prototype : NULL,
+                NULL,
+                cflags);
     }
     if (ret == NULL) {
         return NULL;
