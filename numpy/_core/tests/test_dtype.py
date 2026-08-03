@@ -1115,6 +1115,29 @@ class TestString:
         # Pull request #4722
         np.array(["", ""]).astype(object)
 
+    @pytest.mark.parametrize("base", ["S", "U", "S0", "U0"])
+    @pytest.mark.parametrize("shape", [(), (2,), (2, 3), [2, 3]])
+    def test_zero_length_string_dtype_shape_tuple(self, base, shape):
+        # gh-27301: unsized/zero-length string dtypes must accept a shape
+        # sequence (as used by dtype((a.dtype, a.shape[1:]))), not only an
+        # integer itemsize.
+        dt = np.dtype((base, shape))
+        expected_shape = tuple(shape)
+        if expected_shape == ():
+            assert dt == np.dtype(base)
+            assert dt.itemsize == 0
+        else:
+            assert dt.shape == expected_shape
+            assert dt.base == np.dtype(base)
+            assert dt.base.itemsize == 0
+            assert dt.itemsize == 0
+
+    @pytest.mark.parametrize("base", ["S", "U"])
+    def test_zero_length_string_dtype_itemsize_still_works(self, base):
+        # Integer second element remains an itemsize (characters for Unicode).
+        assert np.dtype((base, 0)).itemsize == 0
+        assert np.dtype((base, 3)).itemsize == (12 if base == "U" else 3)
+
     def test_void_subclass_unsized(self):
         dt = np.dtype(np.record)
         assert_equal(repr(dt), "dtype('V')")

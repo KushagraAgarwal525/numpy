@@ -255,8 +255,15 @@ _convert_from_tuple(PyObject *obj, int align)
     Py_DECREF(res);
     /*
      * We get here if _try_convert_from_inherit_tuple failed without crashing
+     *
+     * Unsized flexible types normally take the second tuple item as an
+     * itemsize (e.g. ("S", 10)).  However, when the second item is a shape
+     * sequence, treat it as a subarray shape instead so that constructions
+     * like dtype((a.dtype, a.shape[1:])) work for zero-length string dtypes
+     * (S0/U0), which are also "unsized" by elsize == 0.  See gh-27301.
      */
-    if (PyDataType_ISUNSIZED(type)) {
+    int val_is_shape = PyTuple_Check(val) || PyList_Check(val);
+    if (PyDataType_ISUNSIZED(type) && !val_is_shape) {
         /* interpret next item as a typesize */
         int itemsize = PyArray_PyIntAsInt(PyTuple_GET_ITEM(obj,1));
         if (type->type_num == NPY_UNICODE) {

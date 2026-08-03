@@ -1717,6 +1717,33 @@ class TestStructured:
             assert_equal(yy.itemsize, 0)
             assert_equal(xx, yy)
 
+    def test_zero_width_string_copy_preserves_dtype(self):
+        # gh-27301: copying / cloning a zero-width string view must not
+        # promote S0/U0 to length 1.
+        for code in ("S0", "U0"):
+            data = np.array([("", 12)], dtype=[("a", code), ("b", "i4")])
+            field = data["a"]
+            assert field.dtype == np.dtype(code)
+            assert field.itemsize == 0
+
+            for cloned in (
+                field.copy(),
+                np.empty_like(field),
+                np.zeros_like(field),
+                np.array(field, copy=True),
+                np.array(field, copy=False),
+            ):
+                assert cloned.dtype == field.dtype
+                assert cloned.itemsize == 0
+
+            # dtype((a.dtype, a.shape[1:])) must work for zero-width strings
+            assert np.dtype((field.dtype, field.shape[1:])) == field.dtype
+            shaped = field.reshape(1, -1)
+            dt = np.dtype((shaped.dtype, shaped.shape[1:]))
+            assert dt.shape == (shaped.shape[1],)
+            assert dt.base == shaped.dtype
+            assert dt.itemsize == 0
+
     def test_base_attr(self):
         a = np.zeros(3, dtype='i4,f4')
         b = a[0]
