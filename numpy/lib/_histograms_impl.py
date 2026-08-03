@@ -408,6 +408,21 @@ def _get_bin_edges(a, bins, range, weights):
                     width = 1
                 delta = _unsigned_subtract(last_edge, first_edge)
                 n_equal_bins = int(np.ceil(delta / width))
+                # Guard against pathological automatic estimators (gh-8203).
+                # Freedman-Diaconis with a tiny nonzero IQR but nonzero range
+                # (float precision artifacts) can request ~1e15 bins and OOM
+                # before linspace.  Only intervene when the count is absurdly
+                # large so ordinary outlier-robust FD (more bins than sqrt)
+                # is unchanged; then apply the same half-sqrt floor used by
+                # `_hist_bin_auto` (#28426).
+                max_auto_bins = max(10**6, 1000 * int(a.size))
+                if n_equal_bins > max_auto_bins:
+                    sqrt_bw = _hist_bin_sqrt(a, (first_edge, last_edge))
+                    if sqrt_bw > 0:
+                        n_equal_bins = max(
+                            int(np.ceil(delta / (sqrt_bw / 2.0))), 1)
+                    else:
+                        n_equal_bins = 1
             else:
                 # Width can be zero for some estimators, e.g. FD when
                 # the IQR of the data is zero.
@@ -502,7 +517,9 @@ def histogram_bin_edges(a, bins=10, range=None, weights=None):
 
         'fd' (Freedman Diaconis Estimator)
             Robust (resilient to outliers) estimator that takes into
-            account data variability and data size.
+            account data variability and data size.  Pathologically large
+            bin counts from a near-zero IQR with a nonzero data range are
+            capped (see gh-8203).
 
         'doane'
             An improved version of Sturges' estimator that works better
@@ -581,7 +598,8 @@ def histogram_bin_edges(a, bins=10, range=None, weights=None):
         The binwidth is proportional to the interquartile range (IQR)
         and inversely proportional to cube root of a.size. Can be too
         conservative for small datasets, but is quite good for large
-        datasets. The IQR is very robust to outliers.
+        datasets. The IQR is very robust to outliers.  Pathologically
+        large bin counts from a tiny nonzero IQR are capped (gh-8203).
 
     'scott'
         .. math:: h = \sigma \sqrt[3]{\frac{24 \sqrt{\pi}}{n}}

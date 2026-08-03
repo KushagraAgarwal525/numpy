@@ -429,6 +429,33 @@ class TestHistogram:
         assert edges[0] == Z[0]
         assert edges[-1] == Z[-1]
 
+    def test_gh_8203_fd_near_zero_iqr(self):
+        """
+        Freedman-Diaconis with a tiny nonzero IQR must not try to allocate
+        an astronomical number of bins (MemoryError / OOM).
+        """
+        x = np.array([2, 2, 2 - 1e-15, 2 - 1e-15, 1], dtype=np.float64)
+        counts, edges = np.histogram(x, bins='fd')
+        # Half-sqrt fallback: for n=5, max bins is ceil(2 * sqrt(n)) == 5.
+        assert len(counts) <= 5
+        assert len(counts) >= 1
+        assert edges[0] == x.min()
+        assert edges[-1] == x.max()
+        # Same protection via histogram_bin_edges
+        edges2 = np.histogram_bin_edges(x, bins='fd')
+        assert_array_equal(edges, edges2)
+        # IQR exactly zero still collapses to a single bin
+        lim = np.ones(1000)
+        lim[:3] = 0
+        lim[-4:] = 100
+        edges_fd = np.histogram_bin_edges(lim, bins='fd')
+        assert_array_equal(edges_fd, np.array([0., 100.]))
+        # Ordinary outlier-robust FD must not be clamped by the safety cap
+        xcenter = np.linspace(-10, 10, 50)
+        outlier_dataset = np.hstack((np.linspace(-110, -100, 5), xcenter))
+        assert len(np.histogram(outlier_dataset, bins='fd')[0]) == 21
+
+
 class TestHistogramOptimBinNums:
     """
     Provide test coverage when using provided estimators for optimal number of

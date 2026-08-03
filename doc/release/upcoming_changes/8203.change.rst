@@ -1,0 +1,8 @@
+``histogram`` ``bins='fd'`` no longer OOMs on tiny IQR
+-------------------------------------------------------
+Automatic bin estimators such as Freedman-Diaconis (``bins='fd'``) now
+reject pathologically large bin counts (more than ``max(10**6,
+1000 * a.size)``) and fall back to the same half-sqrt floor already used
+by ``bins='auto'``.  A near-zero but nonzero IQR with a nonzero data
+range no longer attempts to allocate an astronomical bin-edge array
+(gh-8203).
