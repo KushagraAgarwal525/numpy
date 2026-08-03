@@ -1163,6 +1163,33 @@ class TestDateTime:
         with pytest.raises(OverflowError, match="Overflow"):
             arr_2s_big.astype("datetime64[ns]")
 
+    def test_string_to_datetime64_overflow(self):
+        # gh-9956: parsing / casting date strings into a unit that cannot
+        # represent the value must raise OverflowError instead of wrapping.
+        with pytest.raises(OverflowError, match="Overflow"):
+            np.datetime64("4998-01-01 00:00:00", "ns")
+
+        with pytest.raises(OverflowError, match="Overflow"):
+            np.array(["4998-01-01 00:00:00"], dtype="O").astype("M8[ns]")
+
+        with pytest.raises(OverflowError, match="Overflow"):
+            np.array(["4998-01-01"], dtype="S").astype("M8[ns]")
+
+        with pytest.raises(OverflowError, match="Overflow"):
+            np.array(["4998-01-01"], dtype="U").astype("M8[ns]")
+
+        # Same date is fine at millisecond resolution
+        ok = np.array(["4998-01-01 00:00:00"], dtype="O").astype("M8[ms]")
+        assert ok[0] == np.datetime64("4998-01-01T00:00:00.000", "ms")
+
+        # Past the ns range on the low side also overflows
+        with pytest.raises(OverflowError, match="Overflow"):
+            np.datetime64("0001-01-01", "ns")
+
+        # Dates within the ns range still parse correctly
+        assert np.datetime64("2020-01-01", "ns") == \
+            np.datetime64("2020-01-01T00:00:00.000000000")
+
     def test_arithmetic_overflow_raises_add_sub(self):
         # Add/sub on datetime64/timedelta64 must raise OverflowError instead
         # of silently wrapping past INT64 range.  Covers all six loops:
