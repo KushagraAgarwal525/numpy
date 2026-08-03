@@ -4593,6 +4593,9 @@ _array_method_doc('tofile', "fid, /, sep='', format='%s'",
     ----------
     fid : file or str or Path
         An open file object, or a string containing a filename.
+        Objects from the standard library compression modules (``gzip``,
+        ``lzma``, ``bz2``) are also accepted; they are written via their
+        ``write`` method so data is compressed correctly.
     sep : str
         Separator between array items for text output.
         If "" (empty), a binary file is written, equivalent to
