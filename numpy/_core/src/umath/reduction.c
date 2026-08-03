@@ -251,59 +251,90 @@ PyUFunc_ReduceWrapper(PyArrayMethod_Context *context,
         }
         op_flags[nout + 1] = NPY_ITER_READONLY;
     }
-    /* Set up result array axes mapping, operand and wheremask use default */
+    /*
+     * Map iterator axes so reduction axes are innermost under C-order.
+     *
+     * NPY_KEEPORDER prefers contiguous unreduced axes as the inner loop,
+     * which turns float sum/mean into repeated short elementwise adds and
+     * bypasses pairwise summation (gh-8869).  Putting reduced axes last
+     * restores the reduce specialization (accumulator stride 0) with a
+     * long inner count so pairwise summation applies for any memory order.
+     */
+    int ndim = PyArray_NDIM(operand);
+    int operand_axes[NPY_MAXDIMS];
     int result_axes[NPY_MAXDIMS];
+    int outer_axes_list[NPY_MAXDIMS];
+    int reduce_axes_list[NPY_MAXDIMS];
+    int n_outer = 0;
+    int n_reduce = 0;
+    for (int i = 0; i < ndim; i++) {
+        if (axis_flags[i]) {
+            reduce_axes_list[n_reduce++] = i;
+        }
+        else {
+            outer_axes_list[n_outer++] = i;
+        }
+    }
+
+    int curr_axis = 0;
+    for (int i = 0; i < n_outer; i++) {
+        int od = outer_axes_list[i];
+        operand_axes[i] = od;
+        if (keepdims) {
+            result_axes[i] = od;
+        }
+        else {
+            result_axes[i] = curr_axis++;
+        }
+    }
+    for (int i = 0; i < n_reduce; i++) {
+        int od = reduce_axes_list[i];
+        operand_axes[n_outer + i] = od;
+        if (keepdims) {
+            result_axes[n_outer + i] = NPY_ITER_REDUCTION_AXIS(od);
+        }
+        else {
+            result_axes[n_outer + i] = NPY_ITER_REDUCTION_AXIS(-1);
+        }
+    }
+
     int *op_axes[NPY_MAXARGS];
     for (int i = 0; i < nout; i++) {
         op_axes[i] = result_axes;
     }
-    op_axes[nout] = NULL;
-    op_axes[nout + 1] = NULL;
+    op_axes[nout] = operand_axes;
+    /* Wheremask must follow the same axis permutation as the operand. */
+    op_axes[nout + 1] = (wheremask != NULL) ? operand_axes : NULL;
 
-    int curr_axis = 0;
-    for (int i = 0; i < PyArray_NDIM(operand); i++) {
-        if (axis_flags[i]) {
-            if (keepdims) {
-                result_axes[i] = NPY_ITER_REDUCTION_AXIS(curr_axis);
-                curr_axis++;
-            }
-            else {
-                result_axes[i] = NPY_ITER_REDUCTION_AXIS(-1);
-            }
-        }
-        else {
-            result_axes[i] = curr_axis;
-            curr_axis++;
-        }
-    }
+    int expected_out_ndim = keepdims ? ndim : n_outer;
     for (int i = 0; i < nout; i++) {
         if (out[i] == NULL) {
             continue;
         }
         /* NpyIter does not raise a good error message in this common case. */
-        if (NPY_UNLIKELY(curr_axis != PyArray_NDIM(out[i]))) {
+        if (NPY_UNLIKELY(expected_out_ndim != PyArray_NDIM(out[i]))) {
             if (keepdims) {
                 PyErr_Format(PyExc_ValueError,
                         "output parameter for reduction operation %s has the "
                         "wrong number of dimensions: Found %d but expected %d "
                         "(must match the operand's when keepdims=True)",
-                        funcname, PyArray_NDIM(out[i]), curr_axis);
+                        funcname, PyArray_NDIM(out[i]), expected_out_ndim);
             }
             else {
                 PyErr_Format(PyExc_ValueError,
                         "output parameter for reduction operation %s has the "
                         "wrong number of dimensions: Found %d but expected %d",
-                        funcname, PyArray_NDIM(out[i]), curr_axis);
+                        funcname, PyArray_NDIM(out[i]), expected_out_ndim);
             }
             goto fail;
         }
     }
 
     iter = NpyIter_AdvancedNew(wheremask == NULL ? nout + 1 : nout + 2, op, it_flags,
-                               NPY_KEEPORDER, NPY_UNSAFE_CASTING,
+                               NPY_CORDER, NPY_UNSAFE_CASTING,
                                op_flags,
                                op_dtypes,
-                               PyArray_NDIM(operand), op_axes, NULL, buffersize);
+                               ndim, op_axes, NULL, buffersize);
     if (iter == NULL) {
         goto fail;
     }

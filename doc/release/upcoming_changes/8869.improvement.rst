@@ -1,0 +1,8 @@
+More accurate float reductions along non-contiguous axes
+--------------------------------------------------------
+
+``sum``, ``mean``, and other add-based reductions on floating-point arrays now
+keep pairwise summation when the reduced axes are not the contiguous innermost
+axes.  Previously, iterator ordering could turn those reductions into repeated
+short elementwise adds, so large ``float32`` arrays of ones could return
+``2**24`` instead of the true count (see `gh-8869`).
