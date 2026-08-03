@@ -172,3 +172,97 @@ class TestRegression:
             inspect.signature(cls)
         except ValueError:
             pytest.fail(f"invalid signature: {cls.__module__}.{cls.__qualname__}")
+
+
+@pytest.mark.parametrize(
+    "bitgen_cls",
+    [
+        random.PCG64,
+        random.PCG64DXSM,
+        random.MT19937,
+        random.Philox,
+        random.SFC64,
+    ],
+)
+class TestBitGeneratorFailedReinit:
+    """Regression tests for gh-28784.
+
+    Failed BitGenerator.__init__ must not leave a previously valid instance
+    with a NULL C state pointer (which used to make random_raw segfault).
+    """
+
+    def test_failed_reinit_preserves_usable_state(self, bitgen_cls):
+        bg = bitgen_cls(12345)
+        before = bg.random_raw(5)
+        bg.state  # ensure state property works
+        with pytest.raises(ValueError):
+            bg.__init__(("",))
+        # Prior state must remain usable (no segfault, no ValueError).
+        after = bg.random_raw(5)
+        assert_(isinstance(after, np.ndarray))
+        assert_array_equal(after.shape, (5,))
+        # Stream advanced from the successful draws before the failed reinit.
+        assert_(not np.array_equal(before, after))
+
+    def test_failed_reinit_preserves_state_dict(self, bitgen_cls):
+        bg = bitgen_cls(999)
+        state_before = bg.state
+        raw_before = bg.random_raw()
+        with pytest.raises((ValueError, TypeError)):
+            bg.__init__([1.5])
+        # Restore the pre-draw state and confirm the generator still works.
+        bg.state = state_before
+        assert_array_equal(bg.random_raw(), raw_before)
+
+    def test_failed_reinit_negative_seed(self, bitgen_cls):
+        bg = bitgen_cls(7)
+        state_before = bg.state
+        with pytest.raises(ValueError):
+            bg.__init__(-1)
+        bg.state = state_before
+        assert_(isinstance(bg.random_raw(), (int, np.integer)))
+
+    def test_issue_reproducer_invalid_seed_tuple(self, bitgen_cls):
+        # Pattern from gh-28784 (invalid seed tuple of str).
+        bg = bitgen_cls()
+        with pytest.raises(ValueError):
+            bg.__init__(("",))
+        # Must not SIGSEGV.
+        raw = bg.random_raw()
+        assert_(isinstance(raw, (int, np.integer)))
+
+
+class TestIncompleteBitGeneratorSubclass:
+    """Incomplete BitGenerator subclasses must fail cleanly (related: gh-25023)."""
+
+    def test_random_raw_uninitialized(self):
+        class FakeRandom(random.BitGenerator):
+            def __init__(self, seed=None):
+                super().__init__(seed)
+
+            def spawn(self, n):
+                raise NotImplementedError
+
+        bg = FakeRandom()
+        with pytest.raises(ValueError, match="not fully initialized"):
+            bg.random_raw()
+
+    def test_generator_rejects_uninitialized(self):
+        class FakeRandom(random.BitGenerator):
+            def __init__(self, seed=None):
+                super().__init__(seed)
+
+        bg = FakeRandom()
+        with pytest.raises(ValueError, match="not fully initialized"):
+            random.Generator(bg)
+
+
+class TestPhiloxFailedReinit:
+    def test_invalid_counter_does_not_break_instance(self):
+        bg = random.Philox(123)
+        state = bg.state
+        raw = bg.random_raw(3)
+        with pytest.raises((ValueError, TypeError, OverflowError)):
+            bg.__init__(seed=1, counter="not-an-int")
+        bg.state = state
+        assert_array_equal(bg.random_raw(3), raw)
