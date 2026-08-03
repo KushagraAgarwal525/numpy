@@ -913,10 +913,11 @@ def compress_nd(x, axis=None):
     # Nothing is masked: return x
     if m is nomask or not m.any():
         return x._data
-    # All is masked: return empty
-    if m.all():
-        return nxarray([])
-    # Filter elements through boolean indexing
+    # Filter elements through boolean indexing.
+    # Do not special-case a fully-masked input: suppressing every slice along
+    # the selected axes must still preserve the unsuppressed dimensions
+    # (e.g. shape (3, 3, 2) with axis=(0, 1) -> (0, 0, 2), not (0,)).
+    # See gh-13709.
     data = x._data
     for ax in axis:
         axes = tuple(list(range(ax)) + list(range(ax + 1, x.ndim)))
