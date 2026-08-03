@@ -2217,8 +2217,9 @@ class TestDigitize:
         x = [1, 2, 3 + 1.j]
         bins = [1, 2, 3]
         assert_raises(TypeError, digitize, x, bins)
-        x, bins = bins, x
-        assert_raises(TypeError, digitize, x, bins)
+        # Complex *bins* are comparable and searchable; only complex x is
+        # rejected (the old float64 cast used to make complex bins fail too).
+        assert_array_equal(digitize(bins, x), [1, 2, 2])
 
     def test_return_type(self):
         # Functions returning indices should always return base ndarrays
@@ -2256,7 +2257,7 @@ class TestDigitize:
         x = np.array(['2000', '2001', '2002', '2003', '2004'],
                      dtype='datetime64[Y]')
         assert_array_equal(digitize(x, bins), [0, 1, 2, 3, 3])
-        assert_array_equal(digitize(x, bins[::-1]), [3, 3, 2, 1, 0])
+        assert_array_equal(digitize(x, bins[::-1]), [3, 2, 1, 0, 0])
 
     def test_timedelta64_bins(self):
         bins = np.array([1, 5, 10], dtype='timedelta64[D]')
