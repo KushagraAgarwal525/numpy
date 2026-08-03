@@ -3010,9 +3010,74 @@ UNICODE_compare(npy_ucs4 *ip1, npy_ucs4 *ip2,
 /* void type */
 
 /*
+ * Compare two items with dtype `descr`, aligning/byteswapping into temps
+ * when needed.  Returns -1/0/1 like other compare functions.
+ */
+static int
+_void_compare_aligned(char *ip1, char *ip2, PyArray_Descr *descr,
+                      PyArrayObject *dummy, PyObject *mem_handler)
+{
+    char *nip1 = ip1, *nip2 = ip2;
+    int swap = PyDataType_ISBYTESWAPPED(descr);
+    int res;
+
+    ((PyArrayObject_fields *)dummy)->descr = descr;
+
+    if (swap || descr->alignment > 1) {
+        if (swap || !npy_is_aligned(nip1, descr->alignment)) {
+            /*
+             * create temporary buffer and copy,
+             * always use the current handler for internal allocations
+             */
+            nip1 = PyDataMem_UserNEW(descr->elsize, mem_handler);
+            if (nip1 == NULL) {
+                return 0;
+            }
+            memcpy(nip1, ip1, descr->elsize);
+            if (swap) {
+                PyDataType_GetArrFuncs(descr)->copyswap(nip1, NULL, swap, dummy);
+            }
+        }
+        if (swap || !npy_is_aligned(nip2, descr->alignment)) {
+            /*
+             * create temporary buffer and copy,
+             * always use the current handler for internal allocations
+             */
+            nip2 = PyDataMem_UserNEW(descr->elsize, mem_handler);
+            if (nip2 == NULL) {
+                if (nip1 != ip1) {
+                    /* destroy temporary buffer */
+                    PyDataMem_UserFREE(nip1, descr->elsize, mem_handler);
+                }
+                return 0;
+            }
+            memcpy(nip2, ip2, descr->elsize);
+            if (swap) {
+                PyDataType_GetArrFuncs(descr)->copyswap(nip2, NULL, swap, dummy);
+            }
+        }
+    }
+    res = PyDataType_GetArrFuncs(descr)->compare(nip1, nip2, dummy);
+    if (swap || descr->alignment > 1) {
+        if (nip1 != ip1) {
+            /* destroy temporary buffer */
+            PyDataMem_UserFREE(nip1, descr->elsize, mem_handler);
+        }
+        if (nip2 != ip2) {
+            /* destroy temporary buffer */
+            PyDataMem_UserFREE(nip2, descr->elsize, mem_handler);
+        }
+    }
+    return res;
+}
+
+/*
  * If fields are defined, then compare on first field and if equal
  * compare on second field.  Continue until done or comparison results
  * in not_equal.
+ *
+ * Subarray voids compare elementwise in C order using the base dtype
+ * (gh-10570).  Plain "Vn" voids still compare as raw bytes.
  *
  * Must align data passed on to sub-comparisons.
  * Also must swap data based on to sub-comparisons.
@@ -3022,19 +3087,46 @@ VOID_compare(char *ip1, char *ip2, PyArrayObject *ap)
 {
     _PyArray_LegacyDescr *descr;
     PyObject *names;
-    PyArrayObject_fields dummy_struct;
+    PyArrayObject_fields dummy_struct = get_dummy_stack_array(ap);
     PyArrayObject *dummy = (PyArrayObject *)&dummy_struct;
-    char *nip1, *nip2;
-    int i, res = 0, swap = 0;
+    int i, res = 0;
+
+    descr = (_PyArray_LegacyDescr *)PyArray_DESCR(ap);
 
     if (!PyArray_HASFIELDS(ap)) {
+        if (descr->subarray != NULL) {
+            PyArray_Descr *base = descr->subarray->base;
+            npy_intp subitemsize = base->elsize;
+            npy_intp num, j;
+            PyObject *mem_handler;
+
+            if (subitemsize == 0) {
+                return 0;
+            }
+            /* Subarrays are contiguous in memory */
+            num = descr->elsize / subitemsize;
+
+            mem_handler = PyDataMem_GetHandler();
+            if (mem_handler == NULL) {
+                return 0;
+            }
+            for (j = 0; j < num; j++) {
+                res = _void_compare_aligned(
+                        ip1 + j * subitemsize, ip2 + j * subitemsize,
+                        base, dummy, mem_handler);
+                if (res != 0) {
+                    break;
+                }
+            }
+            Py_DECREF(mem_handler);
+            return res;
+        }
         return STRING_compare(ip1, ip2, ap);
     }
     PyObject *mem_handler = PyDataMem_GetHandler();
     if (mem_handler == NULL) {
         goto finish;
     }
-    descr = (_PyArray_LegacyDescr *)PyArray_DESCR(ap);
     /*
      * Compare on the first-field.  If equal, then
      * compare on the second-field, etc.
@@ -3046,55 +3138,8 @@ VOID_compare(char *ip1, char *ip2, PyArrayObject *ap)
         if (_unpack_field_index(descr, i, &new, &offset) < 0) {
             goto finish;
         }
-        /* Set the fields needed by compare or copyswap */
-        dummy_struct.descr = new;
-
-        swap = PyArray_ISBYTESWAPPED(dummy);
-        nip1 = ip1 + offset;
-        nip2 = ip2 + offset;
-        if (swap || new->alignment > 1) {
-            if (swap || !npy_is_aligned(nip1, new->alignment)) {
-                /*
-                 * create temporary buffer and copy,
-                 * always use the current handler for internal allocations
-                 */
-                nip1 = PyDataMem_UserNEW(new->elsize, mem_handler);
-                if (nip1 == NULL) {
-                    goto finish;
-                }
-                memcpy(nip1, ip1 + offset, new->elsize);
-                if (swap)
-                    PyDataType_GetArrFuncs(new)->copyswap(nip1, NULL, swap, dummy);
-            }
-            if (swap || !npy_is_aligned(nip2, new->alignment)) {
-                /*
-                 * create temporary buffer and copy,
-                 * always use the current handler for internal allocations
-                 */
-                nip2 = PyDataMem_UserNEW(new->elsize, mem_handler);
-                if (nip2 == NULL) {
-                    if (nip1 != ip1 + offset) {
-                        /* destroy temporary buffer */
-                        PyDataMem_UserFREE(nip1, new->elsize, mem_handler);
-                    }
-                    goto finish;
-                }
-                memcpy(nip2, ip2 + offset, new->elsize);
-                if (swap)
-                    PyDataType_GetArrFuncs(new)->copyswap(nip2, NULL, swap, dummy);
-            }
-        }
-        res = PyDataType_GetArrFuncs(new)->compare(nip1, nip2, dummy);
-        if (swap || new->alignment > 1) {
-            if (nip1 != ip1 + offset) {
-                /* destroy temporary buffer */
-                PyDataMem_UserFREE(nip1, new->elsize, mem_handler);
-            }
-            if (nip2 != ip2 + offset) {
-                /* destroy temporary buffer */
-                PyDataMem_UserFREE(nip2, new->elsize, mem_handler);
-            }
-        }
+        res = _void_compare_aligned(ip1 + offset, ip2 + offset,
+                                    new, dummy, mem_handler);
         if (res != 0) {
             break;
         }
