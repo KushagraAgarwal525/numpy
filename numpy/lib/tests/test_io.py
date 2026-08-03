@@ -1345,6 +1345,27 @@ class Testfromregex:
         with pytest.raises(TypeError, match='structured datatype'):
             np.fromregex(c, regexp, dtype=np.float64)
 
+    def test_structured_subarray_dtype(self):
+        # gh-8812: fromregex should accept structured dtypes with subarrays,
+        # matching genfromtxt/loadtxt behavior.
+        data = b"AA 2.3 2.6 2.8\nBB 3.3 3.6 180.0\n"
+        regexp = r"(..)\s+([0-9.]+)\s+([0-9.]+)\s+([0-9.]+)\s*"
+        dtype = np.dtype([('key', 'S2'), ('v', float, 3)])
+        x = np.fromregex(BytesIO(data), regexp, dtype=dtype)
+        expected = np.array(
+            [(b'AA', [2.3, 2.6, 2.8]),
+             (b'BB', [3.3, 3.6, 180.0])],
+            dtype=dtype,
+        )
+        assert_array_equal(x, expected)
+
+        # Nested structured fields should also accept a flat group tuple.
+        nested = np.dtype([('key', 'S2'), ('v', [('x', float), ('y', float)])])
+        x = np.fromregex(BytesIO(b"AA 1.0 2.0\n"),
+                         r"(..)\s+([0-9.]+)\s+([0-9.]+)\s*", nested)
+        expected = np.array([(b'AA', (1.0, 2.0))], dtype=nested)
+        assert_array_equal(x, expected)
+
 
 #####--------------------------------------------------------------------------
 
