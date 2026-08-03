@@ -1619,9 +1619,43 @@ gentype_richcompare(PyObject *self, PyObject *other, int cmp_op)
         return NULL;
     }
 
-    /* We can always just call RichCompare again */
     if (other_op != NULL) {
-        /* If we use richcompare again, need to ensure that one op is array */
+        PyObject *ufunc = NULL;
+        switch (cmp_op) {
+            case Py_LT:
+                ufunc = n_ops.less;
+                break;
+            case Py_LE:
+                ufunc = n_ops.less_equal;
+                break;
+            case Py_EQ:
+                ufunc = n_ops.equal;
+                break;
+            case Py_NE:
+                ufunc = n_ops.not_equal;
+                break;
+            case Py_GT:
+                ufunc = n_ops.greater;
+                break;
+            case Py_GE:
+                ufunc = n_ops.greater_equal;
+                break;
+        }
+
+        /*
+         * Call the comparison ufunc with the scalar so that
+         * `__array_ufunc__` overrides see a scalar rather than a 0-d
+         * array (gh-12142).  This matches the arithmetic scalar binop
+         * path.  Void/structured comparisons still need the array
+         * richcompare special-casing in `array_richcompare`.
+         */
+        if (ufunc != NULL && !PyArray_IsScalar(self, Void)) {
+            PyObject *res = PyArray_GenericBinaryFunction(self, other_op, ufunc);
+            Py_DECREF(other_op);
+            return res;
+        }
+
+        /* Fall back: convert scalar to 0-d array and richcompare */
         self_op = PyArray_FromScalar(self, NULL);
         if (self_op == NULL) {
             Py_DECREF(other_op);
