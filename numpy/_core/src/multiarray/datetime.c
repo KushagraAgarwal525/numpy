@@ -30,6 +30,7 @@
 
 #include "dtype_transfer.h"
 #include "lowlevel_strided_loops.h"
+#include "npy_extint128.h"
 
 #include <datetime.h>
 #include <time.h>
@@ -289,12 +290,36 @@ set_datetimestruct_days(npy_int64 days, npy_datetimestruct *dts)
     }
 }
 
+/*
+ * Compute *acc = *acc * factor + addend with overflow checking.
+ *
+ * Uses 128-bit intermediates so that cases where a*b overflows int64 but
+ * a*b+c still fits (common near the datetime64[ns] limits) are handled
+ * correctly.  Rejects results equal to NPY_DATETIME_NAT (INT64_MIN).
+ *
+ * Returns 0 on success, -1 on overflow (with OverflowError set).
+ */
+static int
+_datetime_mul_add_checked(npy_int64 *acc, npy_int64 factor, npy_int64 addend)
+{
+    char overflow = 0;
+    npy_extint128_t prod = mul_64_64(*acc, factor);
+    npy_extint128_t sum = add_128(prod, to_128(addend), &overflow);
+    npy_int64 result = to_64(sum, &overflow);
+
+    if (overflow || result == NPY_DATETIME_NAT) {
+        PyErr_SetString(PyExc_OverflowError,
+                "Overflow when converting between datetime64 units");
+        return -1;
+    }
+    *acc = result;
+    return 0;
+}
+
 /*NUMPY_API
  *
  * Converts a datetime from a datetimestruct to a datetime based
  * on some metadata. The date is assumed to be valid.
- *
- * TODO: If meta->num is really big, there could be overflow
  *
  * Returns 0 on success, -1 on failure.
  */
@@ -339,6 +364,12 @@ NpyDatetime_ConvertDatetimeStructToDatetime64(PyArray_DatetimeMetaData *meta,
                     ret = days / 7;
                 }
                 else {
+                    if (days < NPY_MIN_INT64 + 6) {
+                        PyErr_SetString(PyExc_OverflowError,
+                                "Overflow when converting between "
+                                "datetime64 units");
+                        return -1;
+                    }
                     ret = (days - 6) / 7;
                 }
                 break;
@@ -346,69 +377,92 @@ NpyDatetime_ConvertDatetimeStructToDatetime64(PyArray_DatetimeMetaData *meta,
                 ret = days;
                 break;
             case NPY_FR_h:
-                ret = days * 24 +
-                      dts->hour;
+                ret = days;
+                if (_datetime_mul_add_checked(&ret, 24, dts->hour) < 0) {
+                    return -1;
+                }
                 break;
             case NPY_FR_m:
-                ret = (days * 24 +
-                      dts->hour) * 60 +
-                      dts->min;
+                ret = days;
+                if (_datetime_mul_add_checked(&ret, 24, dts->hour) < 0 ||
+                        _datetime_mul_add_checked(&ret, 60, dts->min) < 0) {
+                    return -1;
+                }
                 break;
             case NPY_FR_s:
-                ret = ((days * 24 +
-                      dts->hour) * 60 +
-                      dts->min) * 60 +
-                      dts->sec;
+                ret = days;
+                if (_datetime_mul_add_checked(&ret, 24, dts->hour) < 0 ||
+                        _datetime_mul_add_checked(&ret, 60, dts->min) < 0 ||
+                        _datetime_mul_add_checked(&ret, 60, dts->sec) < 0) {
+                    return -1;
+                }
                 break;
             case NPY_FR_ms:
-                ret = (((days * 24 +
-                      dts->hour) * 60 +
-                      dts->min) * 60 +
-                      dts->sec) * 1000 +
-                      dts->us / 1000;
+                ret = days;
+                if (_datetime_mul_add_checked(&ret, 24, dts->hour) < 0 ||
+                        _datetime_mul_add_checked(&ret, 60, dts->min) < 0 ||
+                        _datetime_mul_add_checked(&ret, 60, dts->sec) < 0 ||
+                        _datetime_mul_add_checked(
+                            &ret, 1000, dts->us / 1000) < 0) {
+                    return -1;
+                }
                 break;
             case NPY_FR_us:
-                ret = (((days * 24 +
-                      dts->hour) * 60 +
-                      dts->min) * 60 +
-                      dts->sec) * 1000000 +
-                      dts->us;
+                ret = days;
+                if (_datetime_mul_add_checked(&ret, 24, dts->hour) < 0 ||
+                        _datetime_mul_add_checked(&ret, 60, dts->min) < 0 ||
+                        _datetime_mul_add_checked(&ret, 60, dts->sec) < 0 ||
+                        _datetime_mul_add_checked(&ret, 1000000, dts->us) < 0) {
+                    return -1;
+                }
                 break;
             case NPY_FR_ns:
-                ret = ((((days * 24 +
-                      dts->hour) * 60 +
-                      dts->min) * 60 +
-                      dts->sec) * 1000000 +
-                      dts->us) * 1000 +
-                      dts->ps / 1000;
+                ret = days;
+                if (_datetime_mul_add_checked(&ret, 24, dts->hour) < 0 ||
+                        _datetime_mul_add_checked(&ret, 60, dts->min) < 0 ||
+                        _datetime_mul_add_checked(&ret, 60, dts->sec) < 0 ||
+                        _datetime_mul_add_checked(&ret, 1000000, dts->us) < 0 ||
+                        _datetime_mul_add_checked(
+                            &ret, 1000, dts->ps / 1000) < 0) {
+                    return -1;
+                }
                 break;
             case NPY_FR_ps:
-                ret = ((((days * 24 +
-                      dts->hour) * 60 +
-                      dts->min) * 60 +
-                      dts->sec) * 1000000 +
-                      dts->us) * 1000000 +
-                      dts->ps;
+                ret = days;
+                if (_datetime_mul_add_checked(&ret, 24, dts->hour) < 0 ||
+                        _datetime_mul_add_checked(&ret, 60, dts->min) < 0 ||
+                        _datetime_mul_add_checked(&ret, 60, dts->sec) < 0 ||
+                        _datetime_mul_add_checked(&ret, 1000000, dts->us) < 0 ||
+                        _datetime_mul_add_checked(
+                            &ret, 1000000, dts->ps) < 0) {
+                    return -1;
+                }
                 break;
             case NPY_FR_fs:
                 /* only 2.6 hours */
-                ret = (((((days * 24 +
-                      dts->hour) * 60 +
-                      dts->min) * 60 +
-                      dts->sec) * 1000000 +
-                      dts->us) * 1000000 +
-                      dts->ps) * 1000 +
-                      dts->as / 1000;
+                ret = days;
+                if (_datetime_mul_add_checked(&ret, 24, dts->hour) < 0 ||
+                        _datetime_mul_add_checked(&ret, 60, dts->min) < 0 ||
+                        _datetime_mul_add_checked(&ret, 60, dts->sec) < 0 ||
+                        _datetime_mul_add_checked(&ret, 1000000, dts->us) < 0 ||
+                        _datetime_mul_add_checked(&ret, 1000000, dts->ps) < 0 ||
+                        _datetime_mul_add_checked(
+                            &ret, 1000, dts->as / 1000) < 0) {
+                    return -1;
+                }
                 break;
             case NPY_FR_as:
                 /* only 9.2 secs */
-                ret = (((((days * 24 +
-                      dts->hour) * 60 +
-                      dts->min) * 60 +
-                      dts->sec) * 1000000 +
-                      dts->us) * 1000000 +
-                      dts->ps) * 1000000 +
-                      dts->as;
+                ret = days;
+                if (_datetime_mul_add_checked(&ret, 24, dts->hour) < 0 ||
+                        _datetime_mul_add_checked(&ret, 60, dts->min) < 0 ||
+                        _datetime_mul_add_checked(&ret, 60, dts->sec) < 0 ||
+                        _datetime_mul_add_checked(&ret, 1000000, dts->us) < 0 ||
+                        _datetime_mul_add_checked(&ret, 1000000, dts->ps) < 0 ||
+                        _datetime_mul_add_checked(
+                            &ret, 1000000, dts->as) < 0) {
+                    return -1;
+                }
                 break;
             default:
                 /* Something got corrupted */
