@@ -214,10 +214,25 @@ def test_gen_pyf_no_overwrite(capfd, hello_world_f90, monkeypatch):
 
     with util.switchdir(ipath.parent):
         Path("faker.pyf").write_text("Fake news", encoding="ascii")
-        with pytest.raises(SystemExit):
+        with pytest.raises(SystemExit) as exc_info:
             f2pycli()  # Refuse to overwrite
-            _, err = capfd.readouterr()
-            assert "Use --overwrite-signature to overwrite" in err
+        assert exc_info.value.code == 1
+        _, err = capfd.readouterr()
+        assert "Use --overwrite-signature to overwrite" in err
+
+
+def test_unknown_option_nonzero_exit(capfd, monkeypatch):
+    """Unknown CLI options must exit with a non-zero status.
+
+    Regression for gh-31409: bare ``sys.exit()`` returned success (0), so
+    wrappers such as fortran_magic treated failed f2py invocations as OK.
+    """
+    monkeypatch.setattr(sys, "argv", ["f2py", "--unknown-option"])
+    with pytest.raises(SystemExit) as exc_info:
+        f2pycli()
+    assert exc_info.value.code == 1
+    _, err = capfd.readouterr()
+    assert "Unknown option '--unknown-option'" in err
 
 
 @pytest.mark.skipif(sys.version_info <= (3, 12), reason="Python 3.12 required")
@@ -253,10 +268,11 @@ def test_no_distutils_backend(capfd, hello_world_f90, monkeypatch):
     monkeypatch.setattr(
         sys, "argv", ["f2py", "--help-link"]
     )
-    with pytest.raises(SystemExit):
+    with pytest.raises(SystemExit) as exc_info:
         f2pycli()
-        out, _ = capfd.readouterr()
-        assert "Unknown option --help-link" in out
+    assert exc_info.value.code == 1
+    _, err = capfd.readouterr()
+    assert "Unknown option '--help-link'" in err
 
     monkeypatch.setattr(
         sys, "argv", ["f2py", "--backend", "distutils"]
