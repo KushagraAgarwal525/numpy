@@ -2112,16 +2112,16 @@ def test_swapped_singleton_against_direct(restore_singleton_bitgen):
 def test_set_bit_generator_preserves_lock_identity(restore_singleton_bitgen):
     # gh-32063: lock object identity must stay stable across swaps so waiters
     # that already captured the lock remain synchronized with the new bitgen.
-    rs = np.random.mtrand._rand
-    old_lock = rs.lock
+    old_bg = np.random.get_bit_generator()
+    old_lock = old_bg.lock
     bg = PCG64(0)
     assert bg.lock is not old_lock
     np.random.set_bit_generator(bg)
-    assert rs.lock is old_lock
+    assert np.random.get_bit_generator() is bg
     assert bg.lock is old_lock
     # Generator sharing the singleton bitgen must use the same lock.
     gen = np.random.Generator(np.random.get_bit_generator())
-    assert gen.lock is old_lock
+    assert gen.bit_generator.lock is old_lock
 
 
 @pytest.mark.skipif(IS_WASM, reason="can't start thread")
