@@ -262,6 +262,38 @@ npy_PyFile_CloseFile(PyObject *file)
     return 0;
 }
 
+/*
+ * Return 1 if `file` is a stdlib compression wrapper (gzip/lzma/bz2),
+ * 0 otherwise. These objects expose fileno() of the compressed on-disk
+ * stream, so C stdio reads/writes silently corrupt data (gh-10866).
+ * On error returns 0 after clearing the exception (best-effort check).
+ */
+static inline int
+npy_PyFile_IsCompressionWrapper(PyObject *file)
+{
+    PyObject *mod, *base;
+    int result;
+
+    mod = PyImport_ImportModule("_compression");
+    if (mod == NULL) {
+        PyErr_Clear();
+        return 0;
+    }
+    base = PyObject_GetAttrString(mod, "BaseStream");
+    Py_DECREF(mod);
+    if (base == NULL) {
+        PyErr_Clear();
+        return 0;
+    }
+    result = PyObject_IsInstance(file, base);
+    Py_DECREF(base);
+    if (result < 0) {
+        PyErr_Clear();
+        return 0;
+    }
+    return result;
+}
+
 /* This is a copy of _PyErr_ChainExceptions, which
  *  is no longer exported from Python3.12
  */

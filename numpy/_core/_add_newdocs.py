@@ -1661,8 +1661,11 @@ add_newdoc('numpy._core.multiarray', 'fromfile',
     ----------
     file : file or str or Path
         An open file object, a string containing the filename, or a Path object.
-        When reading from a file object it must support random access
-        (i.e. it must have tell and seek methods).
+        When reading from an ordinary file object it must support random access
+        (i.e. it must have tell and seek methods).  Objects from the standard
+        library compression modules (``gzip``, ``lzma``, ``bz2``) are also
+        accepted; they are read via their ``read`` method so compressed data is
+        decompressed correctly.
     dtype : data-type
         Data type of the returned array.
         For binary files, it is used to determine the size and byte-order
@@ -4590,6 +4593,9 @@ _array_method_doc('tofile', "fid, /, sep='', format='%s'",
     ----------
     fid : file or str or Path
         An open file object, or a string containing a filename.
+        Objects from the standard library compression modules (``gzip``,
+        ``lzma``, ``bz2``) are also accepted; they are written via their
+        ``write`` method so data is compressed correctly.
     sep : str
         Separator between array items for text output.
         If "" (empty), a binary file is written, equivalent to
