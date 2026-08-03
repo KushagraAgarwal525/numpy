@@ -2238,6 +2238,64 @@ class TestMethods:
         check_round(np.array([4.5 + 1.5j]), [4 + 2j])
         check_round(np.array([12.5 + 15.5j]), [10 + 20j], -1)
 
+    @pytest.mark.parametrize("dtype", [
+        np.int8, np.int16, np.int32, np.int64,
+        np.uint8, np.uint16, np.uint32, np.uint64,
+    ])
+    def test_round_integer_negative_decimals(self, dtype):
+        # gh-11881: integer rounding with negative decimals must not use
+        # float64 (mantissa/overflow). Compare with Python round for values
+        # that remain representable in dtype.
+        info = np.iinfo(dtype)
+        samples = [0, 1, 5, 15, 25, 999, 1500, 2500]
+        if info.min < 0:
+            samples += [-1, -5, -15, -25, -999, -1500, -2500]
+        samples = [dtype(v) for v in samples if info.min <= v <= info.max]
+
+        for decimals in (-1, -2, -3):
+            for value in samples:
+                expected = round(int(value), decimals)
+                if expected < info.min or expected > info.max:
+                    with pytest.raises(OverflowError):
+                        np.round(value, decimals)
+                else:
+                    assert_equal(np.round(value, decimals), dtype(expected))
+
+            arr = np.array(
+                [v for v in samples
+                 if info.min <= round(int(v), decimals) <= info.max],
+                dtype=dtype,
+            )
+            if arr.size == 0:
+                continue
+            expected = np.array(
+                [round(int(v), decimals) for v in arr], dtype=dtype
+            )
+            assert_equal(np.round(arr, decimals), expected)
+            out = np.zeros_like(arr)
+            res = np.round(arr, decimals, out=out)
+            assert_equal(out, expected)
+            assert res is out
+
+    def test_round_int64_large_values(self):
+        # Values past the float64 mantissa must still round correctly.
+        cases = [
+            (np.int64(1234567890123456789), -3, 1234567890123457000),
+            (np.int64(-1234567890123456789), -3, -1234567890123457000),
+            (np.int64(2**60 + 12345), -1, 1152921504606859320),
+            (np.int64(2**60 + 12345), -3, 1152921504606859000),
+        ]
+        for value, decimals, expected in cases:
+            assert_equal(np.round(value, decimals), expected)
+            assert_equal(value.round(decimals), expected)
+            assert_equal(round(value, decimals), expected)
+
+        # Rounded result is not representable as int64.
+        with pytest.raises(OverflowError):
+            np.round(np.int64(2**63 - 1), -3)
+        with pytest.raises(OverflowError):
+            np.round(np.int64(-2**63), -3)
+
     @pytest.mark.parametrize('dt', ['uint8', int, float, complex])
     def test_round_copies(self, dt):
         a = np.arange(3, dtype=dt)

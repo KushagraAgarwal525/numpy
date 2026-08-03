@@ -36,6 +36,435 @@ power_of_ten(int n)
     return ret;
 }
 
+/*
+ * 10**n as uint64. Returns 1 if n >= 20 (larger than any uint64 value can
+ * need for rounding), in which case *out is set to 0 as a sentinel.
+ */
+static int
+uint64_power_of_ten(int n, npy_uint64 *out)
+{
+    static const npy_uint64 p10[] = {
+        NPY_ULONGLONG_SUFFIX(1),
+        NPY_ULONGLONG_SUFFIX(10),
+        NPY_ULONGLONG_SUFFIX(100),
+        NPY_ULONGLONG_SUFFIX(1000),
+        NPY_ULONGLONG_SUFFIX(10000),
+        NPY_ULONGLONG_SUFFIX(100000),
+        NPY_ULONGLONG_SUFFIX(1000000),
+        NPY_ULONGLONG_SUFFIX(10000000),
+        NPY_ULONGLONG_SUFFIX(100000000),
+        NPY_ULONGLONG_SUFFIX(1000000000),
+        NPY_ULONGLONG_SUFFIX(10000000000),
+        NPY_ULONGLONG_SUFFIX(100000000000),
+        NPY_ULONGLONG_SUFFIX(1000000000000),
+        NPY_ULONGLONG_SUFFIX(10000000000000),
+        NPY_ULONGLONG_SUFFIX(100000000000000),
+        NPY_ULONGLONG_SUFFIX(1000000000000000),
+        NPY_ULONGLONG_SUFFIX(10000000000000000),
+        NPY_ULONGLONG_SUFFIX(100000000000000000),
+        NPY_ULONGLONG_SUFFIX(1000000000000000000),
+        NPY_ULONGLONG_SUFFIX(10000000000000000000) /* 10**19 */
+    };
+    if (n < 0) {
+        return -1;
+    }
+    if (n >= (int)(sizeof(p10) / sizeof(p10[0]))) {
+        *out = 0;
+        return 1;
+    }
+    *out = p10[n];
+    return 0;
+}
+
+/* Absolute value of int64 as uint64, including INT64_MIN. */
+static npy_uint64
+u64_abs_i64(npy_int64 x)
+{
+    if (x >= 0) {
+        return (npy_uint64)x;
+    }
+    /* Avoid UB on INT64_MIN: -(x+1) fits, then +1. */
+    return (npy_uint64)(-(x + 1)) + 1;
+}
+
+/*
+ * Round half-to-even to a multiple of scale. Returns -1 if the rounded value
+ * cannot be represented as int64 (sets OverflowError).
+ */
+static int
+round_int64_to_scale(npy_int64 x, npy_uint64 scale, npy_int64 *out)
+{
+    npy_int64 q;
+    npy_uint64 r;
+    int round_up = 0;
+
+    if (scale == 0) {
+        /* scale >= 10**20: every int64 is closer to 0 than to ±scale. */
+        *out = 0;
+        return 0;
+    }
+    if (scale == 1) {
+        *out = x;
+        return 0;
+    }
+
+    if (x >= 0) {
+        q = (npy_int64)((npy_uint64)x / scale);
+        r = (npy_uint64)x % scale;
+    }
+    else {
+        npy_uint64 ax = u64_abs_i64(x);
+        npy_uint64 aq = ax / scale;
+        npy_uint64 ar = ax % scale;
+        if (ar == 0) {
+            if (aq > (npy_uint64)NPY_MAX_INT64 + 1) {
+                goto overflow;
+            }
+            if (aq == (npy_uint64)NPY_MAX_INT64 + 1) {
+                q = NPY_MIN_INT64;
+            }
+            else {
+                q = -(npy_int64)aq;
+            }
+            r = 0;
+        }
+        else {
+            npy_uint64 aq1 = aq + 1;
+            if (aq1 > (npy_uint64)NPY_MAX_INT64 + 1) {
+                goto overflow;
+            }
+            if (aq1 == (npy_uint64)NPY_MAX_INT64 + 1) {
+                q = NPY_MIN_INT64;
+            }
+            else {
+                q = -(npy_int64)aq1;
+            }
+            r = scale - ar;
+        }
+    }
+
+    if (r != 0) {
+        if (r > scale - r) {
+            round_up = 1;
+        }
+        else if (r == scale - r) {
+            /* Exactly halfway: round to even quotient. */
+            if (q & 1) {
+                round_up = 1;
+            }
+        }
+    }
+
+    if (round_up) {
+        if (q == NPY_MAX_INT64) {
+            goto overflow;
+        }
+        q += 1;
+    }
+
+    if (q == 0) {
+        *out = 0;
+        return 0;
+    }
+
+    if (scale > (npy_uint64)NPY_MAX_INT64) {
+        /* |q| >= 1 and scale >= 10**19 => result outside int64. */
+        goto overflow;
+    }
+
+    {
+        npy_int64 s = (npy_int64)scale;
+        npy_int64 res;
+#ifdef HAVE___BUILTIN_MUL_OVERFLOW
+        if (__builtin_mul_overflow(q, s, &res)) {
+            goto overflow;
+        }
+#else
+        if (q > 0) {
+            if (q > NPY_MAX_INT64 / s) {
+                goto overflow;
+            }
+        }
+        else {
+            if (q < NPY_MIN_INT64 / s) {
+                goto overflow;
+            }
+        }
+        res = q * s;
+#endif
+        *out = res;
+        return 0;
+    }
+
+overflow:
+    PyErr_SetString(PyExc_OverflowError,
+                    "result of rounding exceeds integer dtype range");
+    return -1;
+}
+
+/*
+ * Round half-to-even to a multiple of scale for uint64. Returns -1 on
+ * overflow (sets OverflowError).
+ */
+static int
+round_uint64_to_scale(npy_uint64 x, npy_uint64 scale, npy_uint64 *out)
+{
+    npy_uint64 q, r;
+    int round_up = 0;
+
+    if (scale == 0) {
+        *out = 0;
+        return 0;
+    }
+    if (scale == 1) {
+        *out = x;
+        return 0;
+    }
+
+    q = x / scale;
+    r = x % scale;
+
+    if (r != 0) {
+        if (r > scale - r) {
+            round_up = 1;
+        }
+        else if (r == scale - r) {
+            if (q & 1) {
+                round_up = 1;
+            }
+        }
+    }
+
+    if (round_up) {
+        if (q == NPY_MAX_UINT64) {
+            goto overflow;
+        }
+        q += 1;
+    }
+
+    if (q == 0) {
+        *out = 0;
+        return 0;
+    }
+
+    {
+        npy_uint64 res;
+#ifdef HAVE___BUILTIN_MUL_OVERFLOW
+        if (__builtin_mul_overflow(q, scale, &res)) {
+            goto overflow;
+        }
+#else
+        if (q > NPY_MAX_UINT64 / scale) {
+            goto overflow;
+        }
+        res = q * scale;
+#endif
+        *out = res;
+        return 0;
+    }
+
+overflow:
+    PyErr_SetString(PyExc_OverflowError,
+                    "result of rounding exceeds integer dtype range");
+    return -1;
+}
+
+/*
+ * Integer arrays with negative decimals cannot safely go through float64:
+ * values beyond the 53-bit mantissa lose precision and can wrap on cast-back
+ * (gh-11881). Round with integer arithmetic instead.
+ */
+static int
+integer_dtype_bounds(int typenum, npy_int64 *min_out, npy_uint64 *max_out,
+                     int *is_unsigned)
+{
+    *is_unsigned = PyTypeNum_ISUNSIGNED(typenum);
+    switch (typenum) {
+        case NPY_BYTE:
+            *min_out = NPY_MIN_BYTE;
+            *max_out = (npy_uint64)NPY_MAX_BYTE;
+            return 0;
+        case NPY_UBYTE:
+            *min_out = 0;
+            *max_out = (npy_uint64)NPY_MAX_UBYTE;
+            return 0;
+        case NPY_SHORT:
+            *min_out = NPY_MIN_SHORT;
+            *max_out = (npy_uint64)NPY_MAX_SHORT;
+            return 0;
+        case NPY_USHORT:
+            *min_out = 0;
+            *max_out = (npy_uint64)NPY_MAX_USHORT;
+            return 0;
+        case NPY_INT:
+            *min_out = NPY_MIN_INT;
+            *max_out = (npy_uint64)NPY_MAX_INT;
+            return 0;
+        case NPY_UINT:
+            *min_out = 0;
+            *max_out = (npy_uint64)NPY_MAX_UINT;
+            return 0;
+        case NPY_LONG:
+            *min_out = NPY_MIN_LONG;
+            *max_out = (npy_uint64)NPY_MAX_LONG;
+            return 0;
+        case NPY_ULONG:
+            *min_out = 0;
+            *max_out = (npy_uint64)NPY_MAX_ULONG;
+            return 0;
+        case NPY_LONGLONG:
+            *min_out = NPY_MIN_LONGLONG;
+            *max_out = (npy_uint64)NPY_MAX_LONGLONG;
+            return 0;
+        case NPY_ULONGLONG:
+            *min_out = 0;
+            *max_out = (npy_uint64)NPY_MAX_ULONGLONG;
+            return 0;
+        default:
+            return -1;
+    }
+}
+
+static int
+check_rounded_fits_dest(PyArrayObject *work, int is_unsigned_work,
+                        PyArrayObject *ret)
+{
+    npy_intp i, n;
+    npy_int64 dmin = 0;
+    npy_uint64 dmax = 0;
+    int dest_unsigned = 0;
+
+    if (!PyArray_ISINTEGER(ret)) {
+        return 0;
+    }
+    if (integer_dtype_bounds(PyArray_TYPE(ret), &dmin, &dmax,
+                             &dest_unsigned) < 0) {
+        return 0;
+    }
+
+    n = PyArray_SIZE(work);
+    if (is_unsigned_work) {
+        npy_uint64 *buf = (npy_uint64 *)PyArray_DATA(work);
+        for (i = 0; i < n; i++) {
+            if (dest_unsigned) {
+                if (buf[i] > dmax) {
+                    goto overflow;
+                }
+            }
+            else {
+                if (buf[i] > (npy_uint64)NPY_MAX_INT64 ||
+                        (npy_int64)buf[i] > (npy_int64)dmax) {
+                    goto overflow;
+                }
+            }
+        }
+    }
+    else {
+        npy_int64 *buf = (npy_int64 *)PyArray_DATA(work);
+        for (i = 0; i < n; i++) {
+            if (dest_unsigned) {
+                if (buf[i] < 0 || (npy_uint64)buf[i] > dmax) {
+                    goto overflow;
+                }
+            }
+            else {
+                if (buf[i] < dmin || buf[i] > (npy_int64)dmax) {
+                    goto overflow;
+                }
+            }
+        }
+    }
+    return 0;
+
+overflow:
+    PyErr_SetString(PyExc_OverflowError,
+                    "result of rounding exceeds integer dtype range");
+    return -1;
+}
+
+static PyObject *
+PyArray_IntegerRoundNegativeDecimals(PyArrayObject *a, int abs_decimals,
+                                     PyArrayObject *out)
+{
+    int is_unsigned = PyArray_ISUNSIGNED(a);
+    int work_type = is_unsigned ? NPY_UINT64 : NPY_INT64;
+    PyArrayObject *work = NULL;
+    PyArrayObject *ret = NULL;
+    npy_uint64 scale;
+    int scale_status;
+    npy_intp i, n;
+    int own_ret = 0;
+
+    scale_status = uint64_power_of_ten(abs_decimals, &scale);
+    if (scale_status < 0) {
+        PyErr_SetString(PyExc_ValueError, "invalid decimals");
+        return NULL;
+    }
+
+    if (out != NULL) {
+        Py_INCREF(out);
+        ret = out;
+    }
+    else {
+        ret = (PyArrayObject *)PyArray_NewCopy(a, NPY_KEEPORDER);
+        if (ret == NULL) {
+            return NULL;
+        }
+        own_ret = 1;
+    }
+
+    /* Working buffer in int64/uint64 (always a contiguous copy). */
+    work = (PyArrayObject *)PyArray_FromArray(
+            a, PyArray_DescrFromType(work_type),
+            NPY_ARRAY_FORCECAST | NPY_ARRAY_DEFAULT | NPY_ARRAY_ENSURECOPY);
+    if (work == NULL) {
+        goto fail;
+    }
+
+    n = PyArray_SIZE(work);
+    if (is_unsigned) {
+        npy_uint64 *buf = (npy_uint64 *)PyArray_DATA(work);
+        for (i = 0; i < n; i++) {
+            npy_uint64 rounded;
+            if (round_uint64_to_scale(buf[i], scale, &rounded) < 0) {
+                goto fail;
+            }
+            buf[i] = rounded;
+        }
+    }
+    else {
+        npy_int64 *buf = (npy_int64 *)PyArray_DATA(work);
+        for (i = 0; i < n; i++) {
+            npy_int64 rounded;
+            if (round_int64_to_scale(buf[i], scale, &rounded) < 0) {
+                goto fail;
+            }
+            buf[i] = rounded;
+        }
+    }
+
+    if (check_rounded_fits_dest(work, is_unsigned, ret) < 0) {
+        goto fail;
+    }
+
+    if (PyArray_CopyInto(ret, work) < 0) {
+        goto fail;
+    }
+
+    Py_DECREF(work);
+    return (PyObject *)ret;
+
+fail:
+    Py_XDECREF(work);
+    if (own_ret) {
+        Py_DECREF(ret);
+    }
+    else {
+        Py_XDECREF(ret);
+    }
+    return NULL;
+}
+
 NPY_NO_EXPORT PyObject *
 _PyArray_ArgMinMaxCommon(PyArrayObject *op,
         int axis, PyArrayObject *out, int keepdims,
@@ -564,6 +993,20 @@ PyArray_Round(PyArrayObject *a, int decimals, PyArrayObject *out)
         PyErr_SetString(PyExc_ValueError,
                         "invalid output shape");
         return NULL;
+    }
+    /*
+     * Integer + negative decimals: avoid the float64 path (gh-11881).
+     * Positive decimals are a no-op for integers and handled below.
+     */
+    if (decimals < 0 && PyArray_ISINTEGER(a)) {
+        int abs_decimals;
+        if (decimals == INT_MIN) {
+            abs_decimals = INT_MAX;
+        }
+        else {
+            abs_decimals = -decimals;
+        }
+        return PyArray_IntegerRoundNegativeDecimals(a, abs_decimals, out);
     }
     if (PyArray_ISCOMPLEX(a)) {
         PyObject *part;
