@@ -631,14 +631,16 @@ def average(a, axis=None, weights=None, returned=False, *,
             avg_as_array = np.asanyarray(avg)
             scl = avg_as_array.dtype.type(a.size / avg_as_array.size)
         else:
-            avg = a.mean(axis, where=where, **keepdims_kw)
-            avg_as_array = np.asanyarray(avg)
-            # Number of included elements, matching mean's reduction.
-            scl = np.ones(a.shape, dtype=avg_as_array.dtype).sum(
+            # Count included elements first so we can raise cleanly (matching the
+            # weighted path) instead of mean's empty-slice nan + RuntimeWarning.
+            rcount = np.ones(a.shape, dtype=np.intp).sum(
                 axis=axis, where=where, **keepdims_kw)
-            if np.any(scl == 0):
+            if np.any(rcount == 0):
                 raise ZeroDivisionError(
                     "No elements included in average (where masks all values)")
+            avg = a.mean(axis, where=where, **keepdims_kw)
+            avg_as_array = np.asanyarray(avg)
+            scl = rcount.astype(avg_as_array.dtype, copy=False)
     else:
         wgt = _weights_are_valid(weights=weights, a=a, axis=axis)
 
