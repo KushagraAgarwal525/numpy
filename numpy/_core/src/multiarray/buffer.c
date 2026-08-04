@@ -749,10 +749,16 @@ _buffer_get_info(void **buffer_info_cache_ptr, PyObject *obj, int flags)
 
 
 /*
- * Warn when exporting a buffer without PyBUF_FORMAT for a dtype that cannot
- * provide a PEP 3118 format string. Callers such as hashlib request buffers
- * without a format and previously bypassed the format check, allowing unsafe
- * exports for reference dtypes like StringDType (gh-29226).
+ * Warn when exporting a buffer without PyBUF_FORMAT for a reference dtype
+ * that cannot provide a PEP 3118 format string. Callers such as hashlib
+ * request buffers without a format and previously bypassed the format check,
+ * allowing unsafe exports for StringDType (gh-29226): the array data buffer
+ * holds metadata pointers, not string bytes, so hashes can collide.
+ *
+ * Limited to reference dtypes (PyDataType_REFCHK). Datetime/timedelta and
+ * structured dtypes with holes also fail format construction, but their
+ * data buffers still contain the payload bytes and remain useful for
+ * no-format consumers (e.g. ndarray(..., buffer=arr)).
  *
  * Returns 0 on success (including after emitting a warning), -1 on error.
  */
@@ -760,7 +766,13 @@ static int
 _buffer_warn_if_unformattable(PyObject *obj, PyArray_Descr *descr)
 {
     _tmp_string_t fmt = {NULL, 0, 0};
-    int err = _buffer_format_string(descr, &fmt, obj, NULL, NULL);
+    int err;
+
+    if (!PyDataType_REFCHK(descr)) {
+        return 0;
+    }
+
+    err = _buffer_format_string(descr, &fmt, obj, NULL, NULL);
     if (err == 0) {
         PyMem_Free(fmt.s);
         return 0;
