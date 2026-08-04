@@ -98,8 +98,8 @@ def _replace_nan(a, val):
     a = np.asanyarray(a)
 
     if a.dtype == np.object_:
-        # object arrays do not support `isnan` (gh-9009), so make a guess
-        mask = np.not_equal(a, a, dtype=bool)
+        # Object isnan uses ``obj != obj`` (gh-9009).
+        mask = np.isnan(a)
     elif issubclass(a.dtype.type, np.inexact):
         mask = np.isnan(a)
     else:
@@ -167,8 +167,8 @@ def _remove_nan_1d(arr1d, second_arr1d=None, overwrite_input=False):
         input
     """
     if arr1d.dtype == object:
-        # object arrays do not support `isnan` (gh-9009), so make a guess
-        c = np.not_equal(arr1d, arr1d, dtype=bool)
+        # Object isnan uses ``obj != obj`` (gh-9009).
+        c = np.isnan(arr1d)
     else:
         c = np.isnan(arr1d)
 
@@ -350,9 +350,10 @@ def nanmin(a, axis=None, out=None, keepdims=np._NoValue, initial=np._NoValue,
     if where is not np._NoValue:
         kwargs['where'] = where
 
-    if (type(a) is np.ndarray or type(a) is np.memmap) and a.dtype != np.object_:
-        # Fast, but not safe for subclasses of ndarray, or object arrays,
-        # which do not implement isnan (gh-9009), or fmin correctly (gh-8975)
+    if type(a) is np.ndarray or type(a) is np.memmap:
+        # Fast path. Object arrays use npy_ObjectFMin so NaNs are skipped
+        # (gh-8975); previously they were excluded because fmin shared
+        # ObjectMin with minimum (gh-9009).
         res = np.fmin.reduce(a, axis=axis, out=out, **kwargs)
         if np.isnan(res).any():
             warnings.warn("All-NaN slice encountered", RuntimeWarning,
@@ -479,9 +480,10 @@ def nanmax(a, axis=None, out=None, keepdims=np._NoValue, initial=np._NoValue,
     if where is not np._NoValue:
         kwargs['where'] = where
 
-    if (type(a) is np.ndarray or type(a) is np.memmap) and a.dtype != np.object_:
-        # Fast, but not safe for subclasses of ndarray, or object arrays,
-        # which do not implement isnan (gh-9009), or fmax correctly (gh-8975)
+    if type(a) is np.ndarray or type(a) is np.memmap:
+        # Fast path. Object arrays use npy_ObjectFMax so NaNs are skipped
+        # (gh-8975); previously they were excluded because fmax shared
+        # ObjectMax with maximum (gh-9009).
         res = np.fmax.reduce(a, axis=axis, out=out, **kwargs)
         if np.isnan(res).any():
             warnings.warn("All-NaN slice encountered", RuntimeWarning,

@@ -2537,15 +2537,15 @@ class TestMaximum(_FilterInvalids):
         assert_equal(np.maximum(arg1, arg2), out)
 
     def test_object_nans(self):
-        # Multiple checks to give this a chance to
-        # fail if cmp is used instead of rich compare.
-        # Failure cannot be guaranteed.
-        for i in range(1):
-            x = np.array(float('nan'), object)
-            y = 1.0
-            z = np.array(float('nan'), object)
-            assert_(np.maximum(x, y) == 1.0)
-            assert_(np.maximum(z, y) == 1.0)
+        # gh-5041: object maximum propagates NaN like float maximum.
+        # (Previously this returned 1.0 via order-dependent ObjectMax.)
+        x = np.array(float('nan'), object)
+        y = 1.0
+        z = np.array(float('nan'), object)
+        assert_(np.isnan(np.maximum(x, y)))
+        assert_(np.isnan(np.maximum(z, y)))
+        assert_(np.isnan(np.maximum(y, x)))
+        assert_equal(np.maximum(np.array(2.0, object), y), 2.0)
 
     def test_complex_nans(self):
         nan = np.nan
@@ -2635,15 +2635,15 @@ class TestMinimum(_FilterInvalids):
         assert_equal(np.minimum(arg1, arg2), out)
 
     def test_object_nans(self):
-        # Multiple checks to give this a chance to
-        # fail if cmp is used instead of rich compare.
-        # Failure cannot be guaranteed.
-        for i in range(1):
-            x = np.array(float('nan'), object)
-            y = 1.0
-            z = np.array(float('nan'), object)
-            assert_(np.minimum(x, y) == 1.0)
-            assert_(np.minimum(z, y) == 1.0)
+        # gh-5041: object minimum propagates NaN like float minimum.
+        # (Previously this returned 1.0 via order-dependent ObjectMin.)
+        x = np.array(float('nan'), object)
+        y = 1.0
+        z = np.array(float('nan'), object)
+        assert_(np.isnan(np.minimum(x, y)))
+        assert_(np.isnan(np.minimum(z, y)))
+        assert_(np.isnan(np.minimum(y, x)))
+        assert_equal(np.minimum(np.array(0.0, object), y), 0.0)
 
     def test_complex_nans(self):
         nan = np.nan
@@ -2761,6 +2761,23 @@ class TestFmax(_FilterInvalids):
                 assert_equal(np.fmax([v1], [v2]), [expected])
                 assert_equal(np.fmax.reduce([v1, v2]), expected)
 
+    def test_object_nans(self):
+        # gh-8975: object fmax must skip NaNs like the float loops.
+        x = np.array([1.0, np.nan], dtype=object)
+        assert_equal(np.fmax.reduce(x), 1.0)
+        assert_equal(np.fmax.reduce(x[::-1]), 1.0)
+        assert_equal(np.fmax(x[0], x[1]), 1.0)
+        assert_equal(np.fmax(x[1], x[0]), 1.0)
+        both = np.array([np.nan, np.nan], dtype=object)
+        assert np.isnan(np.fmax.reduce(both))
+
+    def test_object_maximum_propagates_nan(self):
+        # gh-5041: maximum on objects returns NaN if either arg is NaN.
+        one = np.array(1.0, dtype=object)
+        nan = np.array(np.nan, dtype=object)
+        assert np.isnan(np.maximum(one, nan))
+        assert np.isnan(np.maximum(nan, one))
+
 
 class TestFmin(_FilterInvalids):
     def test_reduce(self):
@@ -2823,6 +2840,44 @@ class TestFmin(_FilterInvalids):
             for v1, v2, expected in test_cases:
                 assert_equal(np.fmin([v1], [v2]), [expected])
                 assert_equal(np.fmin.reduce([v1, v2]), expected)
+
+    def test_object_nans(self):
+        # gh-8975: object fmin must skip NaNs like the float loops, not share
+        # ObjectMin with minimum.
+        x = np.array([1.0, np.nan], dtype=object)
+        assert_equal(np.fmin.reduce(x), 1.0)
+        assert_equal(np.fmin.reduce(x[::-1]), 1.0)
+        assert_equal(np.fmin(x[0], x[1]), 1.0)
+        assert_equal(np.fmin(x[1], x[0]), 1.0)
+        both = np.array([np.nan, np.nan], dtype=object)
+        assert np.isnan(np.fmin.reduce(both))
+
+    def test_object_minimum_propagates_nan(self):
+        # gh-5041: minimum on objects returns NaN if either arg is NaN,
+        # independent of argument order.
+        one = np.array(1.0, dtype=object)
+        nan = np.array(np.nan, dtype=object)
+        assert np.isnan(np.minimum(one, nan))
+        assert np.isnan(np.minimum(nan, one))
+        assert np.isnan(np.minimum.reduce(
+            np.array([1.0, np.nan], dtype=object)))
+        assert np.isnan(np.minimum.reduce(
+            np.array([np.nan, 1.0], dtype=object)))
+
+
+class TestObjectIsNan:
+    def test_isnan_object(self):
+        # gh-9009: isnan for object dtype via ``obj != obj``.
+        a = np.array([1.0, np.nan, 2, "x", None], dtype=object)
+        expected = np.array([False, True, False, False, False])
+        assert_array_equal(np.isnan(a), expected)
+        assert_array_equal(np.isnan(np.array([np.nan], dtype=object)), [True])
+        assert_array_equal(np.isnan(np.array([1], dtype=object)), [False])
+
+    def test_isnan_object_complex(self):
+        a = np.array([1 + 0j, complex(np.nan, 0), complex(0, np.nan)],
+                     dtype=object)
+        assert_array_equal(np.isnan(a), [False, True, True])
 
 
 class TestBool:

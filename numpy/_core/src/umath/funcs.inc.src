@@ -53,25 +53,126 @@ npy_ObjectPower(PyObject *x, PyObject *y)
     return PyNumber_Power(x, y, Py_None);
 }
 
+/*
+ * NaN-like test for arbitrary Python objects: True iff ``obj != obj``.
+ * Matches the approach used by ``np.not_equal(a, a)`` for object nanfunctions
+ * (see gh-9009 / gh-8975). Returns 1 if NaN-like, 0 if not, -1 on error.
+ */
+static int
+npy_ObjectIsNan(PyObject *obj)
+{
+    int cmp;
+
+    if (obj == NULL) {
+        obj = Py_None;
+    }
+    /*
+     * Prefer RichCompare over RichCompareBool so identity shortcuts for
+     * == / != do not treat a NaN as equal to itself (same rationale as the
+     * object comparison ufunc loops).
+     */
+    PyObject *tmp = PyObject_RichCompare(obj, obj, Py_NE);
+    if (tmp == NULL) {
+        return -1;
+    }
+    cmp = PyObject_IsTrue(tmp);
+    Py_DECREF(tmp);
+    return cmp;
+}
+
+
 /**begin repeat
  * #Kind = Max, Min#
  * #OP = Py_GE, Py_LE#
+ */
+/*
+ * IEEE-like maximum/minimum for objects: if either argument is NaN-like
+ * (``obj != obj``), return a NaN-like argument (prefer the first).
+ * Otherwise compare with @OP@.  Previously both minimum and fmin shared
+ * this path without NaN logic, which made results order-dependent and
+ * broke ``np.fmin`` on object arrays (gh-8975, gh-5041).
  */
 static PyObject *
 npy_Object@Kind@(PyObject *i1, PyObject *i2)
 {
     PyObject *result;
-    int cmp;
+    int cmp, nan1, nan2;
 
-    cmp = PyObject_RichCompareBool(i1, i2, @OP@);
-    if (cmp < 0) {
+    if (i1 == NULL) {
+        i1 = Py_None;
+    }
+    if (i2 == NULL) {
+        i2 = Py_None;
+    }
+
+    nan1 = npy_ObjectIsNan(i1);
+    if (nan1 < 0) {
         return NULL;
     }
-    if (cmp == 1) {
+    nan2 = npy_ObjectIsNan(i2);
+    if (nan2 < 0) {
+        return NULL;
+    }
+    if (nan1) {
+        result = i1;
+    }
+    else if (nan2) {
+        result = i2;
+    }
+    else {
+        cmp = PyObject_RichCompareBool(i1, i2, @OP@);
+        if (cmp < 0) {
+            return NULL;
+        }
+        result = (cmp == 1) ? i1 : i2;
+    }
+    Py_INCREF(result);
+    return result;
+}
+/**end repeat**/
+
+
+/**begin repeat
+ * #Kind = FMax, FMin#
+ * #OP = Py_GE, Py_LE#
+ */
+/*
+ * NaN-skipping maximum/minimum for objects (``np.fmax`` / ``np.fmin``).
+ * If one argument is NaN-like, return the other; if neither is, compare.
+ */
+static PyObject *
+npy_Object@Kind@(PyObject *i1, PyObject *i2)
+{
+    PyObject *result;
+    int cmp, nan1, nan2;
+
+    if (i1 == NULL) {
+        i1 = Py_None;
+    }
+    if (i2 == NULL) {
+        i2 = Py_None;
+    }
+
+    nan1 = npy_ObjectIsNan(i1);
+    if (nan1 < 0) {
+        return NULL;
+    }
+    nan2 = npy_ObjectIsNan(i2);
+    if (nan2 < 0) {
+        return NULL;
+    }
+    if (nan1) {
+        result = i2;
+    }
+    else if (nan2) {
         result = i1;
     }
     else {
-        result = i2;
+        cmp = PyObject_RichCompareBool(i1, i2, @OP@);
+        if (cmp < 0) {
+            return NULL;
+        }
+        result = (cmp == 1) ? i1 : i2;
     }
     Py_INCREF(result);
     return result;
