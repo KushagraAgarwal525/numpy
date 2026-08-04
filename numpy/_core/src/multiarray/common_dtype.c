@@ -205,6 +205,12 @@ NPY_NO_EXPORT PyArray_DTypeMeta *
 PyArray_PromoteDTypeSequence(
         npy_intp length, PyArray_DTypeMeta **dtypes_in)
 {
+    if (length < 1) {
+        /* Avoid assert abort in reduce_dtypes_to_most_knowledgeable (gh-28829) */
+        PyErr_SetString(PyExc_ValueError,
+                        "at least one dtype is required");
+        return NULL;
+    }
     if (length == 1) {
         Py_INCREF(dtypes_in[0]);
         return dtypes_in[0];

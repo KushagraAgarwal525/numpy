@@ -1,4 +1,5 @@
 import contextlib
+import collections
 import ctypes
 import inspect
 import operator
@@ -517,6 +518,42 @@ class TestRecord:
         assert_dtype_equal(dt, np.dtype(dt.fields))
         dt2 = np.dtype((np.void, dt.fields))
         assert_equal(dt2.fields, dt.fields)
+
+    @pytest.mark.parametrize("factory", [
+        collections.Counter,
+        lambda d=None: collections.defaultdict(int, d or {}),
+    ])
+    def test_from_counter_like_mapping(self, factory):
+        # gh-28829: Counter/defaultdict return defaults for missing keys;
+        # dtype construction must not treat those defaults as "names"/"formats".
+        expected = np.dtype([('a', 'f8'), ('b', 'i4')])
+        field_dict = {'a': ('f8', 0), 'b': ('i4', 8)}
+        assert_dtype_equal(np.dtype(factory(field_dict)), expected)
+
+        empty = factory()
+        assert_dtype_equal(np.dtype(empty), np.dtype([]))
+
+        # Named structured form must also work when keys are really present
+        named = factory({
+            'names': ['a', 'b'],
+            'formats': ['f8', 'i4'],
+            'offsets': [0, 8],
+        })
+        assert_dtype_equal(np.dtype(named), expected)
+
+        # These previously raised TypeError with an exception left set
+        # (debug-build abort via !PyErr_Occurred()). After the fix they use
+        # the empty structured dtype path and raise a clean promotion error.
+        with pytest.raises(np.exceptions.DTypePromotionError):
+            np.promote_types(factory(), np.float64)
+
+    def test_empty_array_converter_result_type(self):
+        # gh-28829: empty _array_converter().result_type() used to abort
+        conv = np._core._multiarray_umath._array_converter()
+        with pytest.raises(ValueError, match="at least one array or dtype"):
+            conv.result_type()
+        # Still works when an extra dtype is provided
+        assert conv.result_type(extra_dtype=np.float64) == np.dtype(np.float64)
 
     def test_from_dict_with_zero_width_field(self):
         # Regression test for #6430 / #2196
