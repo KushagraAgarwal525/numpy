@@ -1816,6 +1816,46 @@ class TestDateTime:
         with assert_raises_regex(TypeError, "common metadata divisor"):
             val1 // val2
 
+    @pytest.mark.parametrize("op1, op2, exp", [
+        # m8 // int floordiv (positive)
+        (np.timedelta64(7, 's'),
+         4,
+         np.timedelta64(1, 's')),
+        (np.timedelta64(8, 's'),
+         4,
+         np.timedelta64(2, 's')),
+        # m8 // int floordiv rounds toward -inf
+        (np.timedelta64(7, 's'),
+         -4,
+         np.timedelta64(-2, 's')),
+        (np.timedelta64(-7, 's'),
+         4,
+         np.timedelta64(-2, 's')),
+        (np.timedelta64(-8, 's'),
+         4,
+         np.timedelta64(-2, 's')),
+        (np.timedelta64(-10, 's'),
+         3,
+         np.timedelta64(-4, 's')),
+        # 1D arrays (int divisor broadcasts)
+        (np.array([1, 2, 3], dtype='m8[s]'),
+         np.array([2], dtype=np.int64),
+         np.array([0, 1, 1], dtype='m8[s]')),
+        ])
+    def test_timedelta_floor_divide_int(self, op1, op2, exp):
+        assert_equal(op1 // op2, exp)
+
+    @pytest.mark.skipif(IS_WASM, reason="fp errors don't work in wasm")
+    def test_timedelta_floor_div_int_div_by_zero(self):
+        with pytest.warns(RuntimeWarning):
+            actual = np.timedelta64(10, 'us') // 0
+            assert_equal(actual, np.timedelta64('NaT', 'us'))
+
+    def test_timedelta_floor_div_int_nat(self):
+        # NaT dividend yields NaT without a floating-point warning
+        actual = np.timedelta64('NaT', 'us') // 50
+        assert_equal(actual, np.timedelta64('NaT', 'us'))
+
     @pytest.mark.parametrize("op1, op2", [
         # reuse the test cases from floordiv
         (np.timedelta64(7, 's'),
@@ -1839,6 +1879,29 @@ class TestDateTime:
     def test_timedelta_divmod(self, op1, op2):
         expected = (op1 // op2, op1 % op2)
         assert_equal(divmod(op1, op2), expected)
+
+    @pytest.mark.parametrize("op1, op2", [
+        (np.timedelta64(7, 's'), 4),
+        (np.timedelta64(7, 's'), -4),
+        (np.timedelta64(-7, 's'), 4),
+        (np.timedelta64(-8, 's'), 4),
+        (np.timedelta64(3456789, 'ns'), 2),
+        (np.array([1, 2, 3], dtype='m8[ns]'),
+         np.array([2], dtype=np.int64)),
+        ])
+    def test_timedelta_divmod_int(self, op1, op2):
+        # Round-trip identity: op1 == op2 * quo + rem (where rem is not NaT)
+        quo, rem = divmod(op1, op2)
+        assert_equal(quo, op1 // op2)
+        assert_equal(rem, op1 % op2)
+        assert_equal(quo.dtype, op1.dtype)
+        assert_equal(rem.dtype, op1.dtype)
+        if np.ndim(op1) == 0:
+            if not np.isnat(rem):
+                assert_equal(op1, op2 * quo + rem)
+        else:
+            valid = ~np.isnat(rem)
+            assert_equal(op1[valid], op2 * quo[valid] + rem[valid])
 
     @pytest.mark.parametrize("op1, op2", [
         # m8 generic units
@@ -1882,6 +1945,19 @@ class TestDateTime:
         with pytest.warns(RuntimeWarning):
             actual = divmod(op1, op2)
         assert_equal(actual, expected)
+
+    @pytest.mark.skipif(IS_WASM, reason="does not work in wasm")
+    def test_timedelta_divmod_int_div_by_zero(self):
+        with pytest.warns(RuntimeWarning):
+            expected = (np.timedelta64(10, 'us') // 0,
+                        np.timedelta64(10, 'us') % 0)
+        with pytest.warns(RuntimeWarning):
+            actual = divmod(np.timedelta64(10, 'us'), 0)
+        assert_equal(actual, expected)
+
+    def test_timedelta_divmod_int_nat(self):
+        nat = np.timedelta64('NaT', 'us')
+        assert_equal(divmod(nat, 50), (nat, nat))
 
     def test_datetime_divide(self):
         for dta, tda, tdb, tdc, tdd in \
@@ -2526,17 +2602,53 @@ class TestDateTime:
             actual = np.timedelta64(10, 's') % np.timedelta64(0, 's')
             assert_equal(actual, np.timedelta64('NaT', 's'))
 
+    @pytest.mark.parametrize("val1, val2, expected", [
+        # m8 % int
+        (np.timedelta64(7, 's'),
+         4,
+         np.timedelta64(3, 's')),
+        (np.timedelta64(8, 's'),
+         4,
+         np.timedelta64(0, 's')),
+        # signs follow Python remainder rules
+        (np.timedelta64(7, 's'),
+         -4,
+         np.timedelta64(-1, 's')),
+        (np.timedelta64(-7, 's'),
+         4,
+         np.timedelta64(1, 's')),
+        (np.timedelta64(-8, 's'),
+         4,
+         np.timedelta64(0, 's')),
+        # pandas-style ns example from gh-16195
+        (np.timedelta64(3456789, 'ns'),
+         2,
+         np.timedelta64(1, 'ns')),
+        # NaT is propagated
+        (np.timedelta64('NaT', 'ns'),
+         50,
+         np.timedelta64('NaT', 'ns')),
+        ])
+    def test_timedelta_modulus_int(self, val1, val2, expected):
+        assert_equal(val1 % val2, expected)
+
+    @pytest.mark.skipif(IS_WASM, reason="fp errors don't work in wasm")
+    def test_timedelta_modulus_int_div_by_zero(self):
+        with pytest.warns(RuntimeWarning):
+            actual = np.timedelta64(10, 's') % 0
+            assert_equal(actual, np.timedelta64('NaT', 's'))
+
     @pytest.mark.parametrize("val1, val2", [
-        # cases where one operand is not
-        # timedelta64
+        # remainder does not support floating-point divisors
         (np.timedelta64(7, 'Y'),
-         15,),
+         15.0,),
         (7.5,
          np.timedelta64(1, 'D')),
+        # int % timedelta remains unsupported
+        (15,
+         np.timedelta64(7, 's')),
         ])
     def test_timedelta_modulus_type_resolution(self, val1, val2):
-        # NOTE: some of the operations may be supported
-        # in the future
         with assert_raises_regex(TypeError,
                                  "'remainder' cannot use operands with types"):
             val1 % val2
