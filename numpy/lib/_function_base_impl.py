@@ -624,6 +624,8 @@ def average(a, axis=None, weights=None, returned=False, *,
     where_is_default = where is True
     if not where_is_default:
         where = np.asanyarray(where)
+        if where.dtype != np.bool_:
+            where = where.astype(bool, copy=False)
 
     if weights is None:
         if where_is_default:

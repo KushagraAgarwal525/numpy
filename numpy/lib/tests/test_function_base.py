@@ -574,6 +574,8 @@ class TestAverage:
         assert_equal(np.average(a, where=[True, True, False, False]), 1.5)
         assert_equal(np.average(a, where=np.array([False, True, True, False])),
                      2.5)
+        # Integer 0/1 masks are accepted like np.mean
+        assert_equal(np.average(a, where=[1, 1, 0, 0]), 1.5)
 
         # matches mean
         where = np.array([True, False, True, True])
