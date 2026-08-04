@@ -25,6 +25,7 @@ cdef extern from "src/pcg64/pcg64.h":
     void pcg64_jump(pcg64_state *state)
     void pcg64_advance(pcg64_state *state, uint64_t *step)
     void pcg64_set_seed(pcg64_state *state, uint64_t *seed, uint64_t *inc)
+    void pcg64dxsm_set_seed(pcg64_state *state, uint64_t *seed, uint64_t *inc)
     void pcg64_get_state(pcg64_state *state, uint64_t *state_arr, int *has_uint32, uint32_t *uinteger)
     void pcg64_set_state(pcg64_state *state, uint64_t *state_arr, int has_uint32, uint32_t uinteger)
 
@@ -365,11 +366,11 @@ cdef class PCG64DXSM(BitGenerator):
         self._bitgen.next_uint32 = &pcg64_cm_uint32
         self._bitgen.next_double = &pcg64_cm_double
         self._bitgen.next_raw = &pcg64_cm_uint64
-        # Seed the _bitgen
+        # Seed the _bitgen with the cheap-multiplier LCG (PCG CM DXSM).
         val = self._seed_seq.generate_state(4, np.uint64)
-        pcg64_set_seed(&self.rng_state,
-                       <uint64_t *>np.PyArray_DATA(val),
-                       (<uint64_t *>np.PyArray_DATA(val) + 2))
+        pcg64dxsm_set_seed(&self.rng_state,
+                           <uint64_t *>np.PyArray_DATA(val),
+                           (<uint64_t *>np.PyArray_DATA(val) + 2))
         self._reset_state_variables()
 
     cdef _reset_state_variables(self):

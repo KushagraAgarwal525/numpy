@@ -1,0 +1,7 @@
+`PCG64DXSM` seeding now uses the cheap LCG multiplier
+-----------------------------------------------------
+`PCG64DXSM` initialization previously advanced the LCG with the default
+128-bit PCG multiplier instead of the 64-bit "cheap" multiplier used by the
+CM DXSM member. Seeding now matches Melissa O'Neill's PCG CM DXSM reference.
+Streams produced by `PCG64DXSM` for a given seed therefore differ from earlier
+NumPy releases; explicitly saved bit-generator states are unaffected.
