@@ -2266,6 +2266,54 @@ class TestMethods:
         assert_raises(ValueError, lambda: a.transpose(0, 0))
         assert_raises(ValueError, lambda: a.transpose(0, 1, 2))
 
+    def test_transpose_attribute_assignment(self):
+        # gh-2667: assignment to .T must succeed so augmented assignment does
+        # not raise after already mutating the array.
+        a = np.array([[1, 2, 3]], dtype=np.float64)
+        b = np.array([[4], [5], [6]], dtype=np.float64)
+        a.T += b
+        assert_array_equal(a, [[5, 7, 9]])
+
+        a = np.arange(6, dtype=np.float64).reshape(2, 3)
+        a.T = np.ones((3, 2))
+        assert_array_equal(a, np.ones((2, 3)))
+
+        a = np.arange(6, dtype=np.float64).reshape(2, 3)
+        with assert_raises(AttributeError):
+            del a.T
+
+        a = np.arange(6, dtype=np.float64).reshape(2, 3)
+        a.setflags(write=False)
+        with assert_raises(ValueError):
+            a.T = np.zeros((3, 2))
+
+        a = np.arange(6, dtype=np.float64).reshape(2, 3)
+        with assert_raises(ValueError):
+            a.T = np.zeros((2, 3))  # wrong shape for the transpose view
+
+    def test_matrix_transpose_attribute_assignment(self):
+        # Same pattern as .T for .mT (gh-2667).
+        a = np.arange(6, dtype=np.float64).reshape(2, 3)
+        a.mT += 1
+        assert_array_equal(a, np.arange(6, dtype=np.float64).reshape(2, 3) + 1)
+
+        a = np.arange(8, dtype=np.float64).reshape(2, 2, 2)
+        a.mT = np.ones((2, 2, 2))
+        assert_array_equal(a, np.ones((2, 2, 2)))
+
+        a = np.arange(3, dtype=np.float64)
+        with assert_raises(ValueError):
+            a.mT = np.ones(3)
+
+        a = np.arange(6, dtype=np.float64).reshape(2, 3)
+        with assert_raises(AttributeError):
+            del a.mT
+
+        a = np.arange(6, dtype=np.float64).reshape(2, 3)
+        a.setflags(write=False)
+        with assert_raises(ValueError):
+            a.mT = np.zeros((3, 2))
+
     def test_sort(self):
         # test ordering for floats and complex containing nans. It is only
         # necessary to check the less-than comparison, so sorts that

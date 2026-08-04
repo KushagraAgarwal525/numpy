@@ -734,10 +734,104 @@ array_transpose_get(PyArrayObject *self, void *NPY_UNUSED(ignored))
     return PyArray_Transpose(self, NULL);
 }
 
+/*
+ * Allow assignment to .T so that augmented assignment works:
+ *   a.T += b
+ * expands to ``tmp = a.T; tmp = tmp.__iadd__(b); a.T = tmp``.
+ * Without a setter the final store raises after the in-place update already
+ * mutated ``a`` (gh-2667).  Semantics match ``a.T[...] = value``.
+ */
+static int
+array_transpose_set(PyArrayObject *self, PyObject *val, void *NPY_UNUSED(ignored))
+{
+    PyArrayObject *transposed;
+    int ret;
+
+    if (val == NULL) {
+        PyErr_SetString(PyExc_AttributeError,
+                "Cannot delete array transpose");
+        return -1;
+    }
+    if (PyArray_FailUnlessWriteable(self, "array") < 0) {
+        return -1;
+    }
+    transposed = (PyArrayObject *)PyArray_Transpose(self, NULL);
+    if (transposed == NULL) {
+        return -1;
+    }
+    /*
+     * Fast path for the common augmented-assignment case: ``val`` is the
+     * transpose view that was just updated in place, so nothing remains to
+     * copy.
+     */
+    if (PyArray_Check(val) &&
+            PyArray_DATA((PyArrayObject *)val) == PyArray_DATA(transposed) &&
+            PyArray_NDIM((PyArrayObject *)val) == PyArray_NDIM(transposed)) {
+        int i;
+        int same_shape = 1;
+        for (i = 0; i < PyArray_NDIM(transposed); i++) {
+            if (PyArray_DIMS((PyArrayObject *)val)[i] !=
+                    PyArray_DIMS(transposed)[i]) {
+                same_shape = 0;
+                break;
+            }
+        }
+        if (same_shape) {
+            Py_DECREF(transposed);
+            return 0;
+        }
+    }
+    ret = PyArray_CopyObject(transposed, val);
+    Py_DECREF(transposed);
+    return ret;
+}
+
 static PyObject *
 array_matrix_transpose_get(PyArrayObject *self, void *NPY_UNUSED(ignored))
 {
     return PyArray_MatrixTranspose(self);
+}
+
+/* Same rationale as array_transpose_set; see gh-2667. */
+static int
+array_matrix_transpose_set(PyArrayObject *self, PyObject *val,
+                           void *NPY_UNUSED(ignored))
+{
+    PyArrayObject *transposed;
+    int ret;
+
+    if (val == NULL) {
+        PyErr_SetString(PyExc_AttributeError,
+                "Cannot delete array matrix transpose");
+        return -1;
+    }
+    if (PyArray_FailUnlessWriteable(self, "array") < 0) {
+        return -1;
+    }
+    transposed = (PyArrayObject *)PyArray_MatrixTranspose(self);
+    if (transposed == NULL) {
+        return -1;
+    }
+    if (PyArray_Check(val) &&
+            PyArray_DATA((PyArrayObject *)val) == PyArray_DATA(transposed) &&
+            PyArray_NDIM((PyArrayObject *)val) == PyArray_NDIM(transposed)) {
+        int i;
+        int same_shape = 1;
+        for (i = 0; i < PyArray_NDIM(transposed); i++) {
+            if (PyArray_DIMS((PyArrayObject *)val)[i] !=
+                    PyArray_DIMS(transposed)[i]) {
+                same_shape = 0;
+                break;
+            }
+        }
+        if (same_shape) {
+            Py_DECREF(transposed);
+            return 0;
+        }
+    }
+    ret = PyArray_CopyObject(transposed, val);
+    Py_DECREF(transposed);
+    return ret;
 }
 
 NPY_NO_EXPORT PyGetSetDef array_getsetlist[] = {
@@ -799,11 +893,11 @@ NPY_NO_EXPORT PyGetSetDef array_getsetlist[] = {
         NULL, NULL},
     {"T",
         (getter)array_transpose_get,
-        NULL,
+        (setter)array_transpose_set,
         NULL, NULL},
     {"mT",
         (getter)array_matrix_transpose_get,
-        NULL,
+        (setter)array_matrix_transpose_set,
         NULL, NULL},
     {"device",
         (getter)array_device,

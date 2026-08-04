@@ -3018,6 +3018,10 @@ add_newdoc('numpy._core.multiarray', 'ndarray', ('T',
 
     Same as ``self.transpose()``.
 
+    Assignment to ``a.T`` is supported and is equivalent to
+    ``a.T[...] = value``.  This also makes augmented assignment such as
+    ``a.T += b`` work without raising after the update (see gh-2667).
+
     Examples
     --------
     >>> import numpy as np
@@ -3048,6 +3052,9 @@ add_newdoc('numpy._core.multiarray', 'ndarray', ('mT',
 
     The matrix transpose is the transpose of the last two dimensions, even
     if the array is of higher dimension.
+
+    Assignment to ``a.mT`` is supported and is equivalent to
+    ``a.mT[...] = value`` (see also :attr:`ndarray.T` and gh-2667).
 
     .. versionadded:: 2.0
 

@@ -1,0 +1,6 @@
+``ndarray.T`` and ``ndarray.mT`` support assignment
+--------------------------------------------------
+Assigning to ``a.T`` or ``a.mT`` now writes through to the transposed view
+(equivalent to ``a.T[...] = value``).  Previously these attributes were
+read-only, so forms such as ``a.T += b`` raised ``AttributeError`` *after*
+the in-place update had already mutated ``a`` (gh-2667).
