@@ -2462,6 +2462,14 @@ _no_nan_types = {
     type(dtype(nt.int16)),
     type(dtype(nt.int32)),
     type(dtype(nt.int64)),
+    type(dtype(nt.uint8)),
+    type(dtype(nt.uint16)),
+    type(dtype(nt.uint32)),
+    type(dtype(nt.uint64)),
+    # Fixed-width byte/unicode strings cannot hold NaN (gh-16377).
+    # Variable-length StringDType can (NA as NaN) and is intentionally omitted.
+    type(dtype("S")),
+    type(dtype("U")),
 }
 
 
@@ -2482,6 +2490,8 @@ def array_equal(a1, a2, equal_nan=False):
         Whether to compare NaN's as equal. If the dtype of a1 and a2 is
         complex, values will be considered equal if either the real or the
         imaginary component of a given value is ``nan``.
+        For dtypes that cannot hold NaN (integers, bool, and fixed-width
+        byte/unicode strings), this flag has no effect.
 
     Returns
     -------

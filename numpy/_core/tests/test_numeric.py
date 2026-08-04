@@ -2263,6 +2263,23 @@ class TestArrayComparisons:
         assert not np.array_equal(a, b)
         assert not np.array_equiv(a, b)
 
+    @pytest.mark.parametrize(
+        "arr",
+        [
+            np.array([1, 2, 3], dtype=np.uint8),
+            np.array([1, 2, 3], dtype=np.uint64),
+            np.array(["a", "b", "c"], dtype="S4"),
+            np.array(["a", "b", "c"], dtype="U4"),
+        ],
+    )
+    def test_array_equal_equal_nan_cannot_hold_nan(self, arr):
+        # Types that cannot hold NaN should accept equal_nan=True (gh-16377).
+        assert np.array_equal(arr, arr, equal_nan=True)
+        assert np.array_equal(arr, arr.copy(), equal_nan=True)
+        other = arr.copy()
+        other[0] = arr[1]
+        assert not np.array_equal(arr, other, equal_nan=True)
+
     def test_none_compares_elementwise(self):
         a = np.array([None, 1, None], dtype=object)
         assert_equal(a == None, [True, False, True])  # noqa: E711
