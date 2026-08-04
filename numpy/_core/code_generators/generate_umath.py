@@ -126,14 +126,21 @@ def _check_order(types1, types2):
 def check_td_order(tds):
     # A quick check for whether the signatures make sense, it happened too
     # often that SIMD additions added loops that do not even make some sense.
-    # TODO: This should likely be a test and it would be nice if it rejected
-    #       duplicate entries as well (but we have many as of writing this).
+    # Also reject duplicate signatures: SIMD dispatch loops already cover
+    # those dtypes, so a second legacy scalar TypeDescription is redundant
+    # and surfaces as duplicate entries in ufunc.types (gh-28365).
     signatures = [t.in_ + t.out for t in tds]
+    seen = {}
+    for i, sign in enumerate(signatures):
+        if sign in seen:
+            raise TypeError(
+                f"Duplicate ufunc signature {sign!r} at positions "
+                f"{seen[sign]} and {i}. If a SIMD dispatch loop already "
+                f"covers this dtype, omit it from the legacy scalar "
+                f"TypeDescription list (see gh-28365).")
+        seen[sign] = i
 
     for prev_i, sign in enumerate(signatures[1:]):
-        if sign in signatures[:prev_i + 1]:
-            continue  # allow duplicates...
-
         _check_order(signatures[prev_i], sign)
 
 
@@ -484,7 +491,8 @@ defdict = {
           TD(ints),
           TD('e', f='pow', astype={'e': 'f'}),
           TD('fd', dispatch=[('loops_umath_fp', 'fd')]),
-          TD(inexact, f='pow', astype={'e': 'f'}),
+          # g+complex only: e/f/d covered above (scalar e + SIMD fd)
+          TD('g' + cmplx, f='pow'),
           TD(O, f='npy_ObjectPower'),
           ),
 'float_power':
@@ -809,7 +817,7 @@ defdict = {
           docstrings.get('numpy._core.umath.arccos'),
           None,
           TD('efd', dispatch=[('loops_umath_fp', 'fd'), ('loops_half', 'e')]),
-          TD(inexact, f='acos', astype={'e': 'f'}),
+          TD('g' + cmplx, f='acos'),  # e/f/d via SIMD dispatch above
           TD(P, f='arccos'),
           ),
 'arccosh':
@@ -817,7 +825,7 @@ defdict = {
           docstrings.get('numpy._core.umath.arccosh'),
           None,
           TD('efd', dispatch=[('loops_umath_fp', 'fd'), ('loops_half', 'e')]),
-          TD(inexact, f='acosh', astype={'e': 'f'}),
+          TD('g' + cmplx, f='acosh'),  # e/f/d via SIMD dispatch above
           TD(P, f='arccosh'),
           ),
 'arcsin':
@@ -825,7 +833,7 @@ defdict = {
           docstrings.get('numpy._core.umath.arcsin'),
           None,
           TD('efd', dispatch=[('loops_umath_fp', 'fd'), ('loops_half', 'e')]),
-          TD(inexact, f='asin', astype={'e': 'f'}),
+          TD('g' + cmplx, f='asin'),  # e/f/d via SIMD dispatch above
           TD(P, f='arcsin'),
           ),
 'arcsinh':
@@ -833,7 +841,7 @@ defdict = {
           docstrings.get('numpy._core.umath.arcsinh'),
           None,
           TD('efd', dispatch=[('loops_umath_fp', 'fd'), ('loops_half', 'e')]),
-          TD(inexact, f='asinh', astype={'e': 'f'}),
+          TD('g' + cmplx, f='asinh'),  # e/f/d via SIMD dispatch above
           TD(P, f='arcsinh'),
           ),
 'arctan':
@@ -841,7 +849,7 @@ defdict = {
           docstrings.get('numpy._core.umath.arctan'),
           None,
           TD('efd', dispatch=[('loops_umath_fp', 'fd'), ('loops_half', 'e')]),
-          TD(inexact, f='atan', astype={'e': 'f'}),
+          TD('g' + cmplx, f='atan'),  # e/f/d via SIMD dispatch above
           TD(P, f='arctan'),
           ),
 'arctanh':
@@ -849,7 +857,7 @@ defdict = {
           docstrings.get('numpy._core.umath.arctanh'),
           None,
           TD('efd', dispatch=[('loops_umath_fp', 'fd'), ('loops_half', 'e')]),
-          TD(inexact, f='atanh', astype={'e': 'f'}),
+          TD('g' + cmplx, f='atanh'),  # e/f/d via SIMD dispatch above
           TD(P, f='arctanh'),
           ),
 'cos':
@@ -877,7 +885,7 @@ defdict = {
           docstrings.get('numpy._core.umath.tan'),
           None,
           TD('efd', dispatch=[('loops_umath_fp', 'fd'), ('loops_half', 'e')]),
-          TD(inexact, f='tan', astype={'e': 'f'}),
+          TD('g' + cmplx, f='tan'),  # e/f/d via SIMD dispatch above
           TD(P, f='tan'),
           ),
 'cosh':
@@ -885,7 +893,7 @@ defdict = {
           docstrings.get('numpy._core.umath.cosh'),
           None,
           TD('efd', dispatch=[('loops_umath_fp', 'fd'), ('loops_half', 'e')]),
-          TD(inexact, f='cosh', astype={'e': 'f'}),
+          TD('g' + cmplx, f='cosh'),  # e/f/d via SIMD dispatch above
           TD(P, f='cosh'),
           ),
 'sinh':
@@ -893,7 +901,7 @@ defdict = {
           docstrings.get('numpy._core.umath.sinh'),
           None,
           TD('efd', dispatch=[('loops_umath_fp', 'fd'), ('loops_half', 'e')]),
-          TD(inexact, f='sinh', astype={'e': 'f'}),
+          TD('g' + cmplx, f='sinh'),  # e/f/d via SIMD dispatch above
           TD(P, f='sinh'),
           ),
 'tanh':
@@ -902,7 +910,7 @@ defdict = {
           None,
           TD('e', dispatch=[('loops_half', 'e')]),
           TD('fd', dispatch=[('loops_hyperbolic', 'fd')]),
-          TD(inexact, f='tanh', astype={'e': 'f'}),
+          TD('g' + cmplx, f='tanh'),  # e/f/d via SIMD dispatch above
           TD(P, f='tanh'),
           ),
 'exp':
@@ -911,7 +919,7 @@ defdict = {
           None,
           TD('e', dispatch=[('loops_half', 'e')]),
           TD('fd', dispatch=[('loops_exponent_log', 'fd')]),
-          TD('fdg' + cmplx, f='exp'),
+          TD('g' + cmplx, f='exp'),  # f/d via SIMD dispatch above
           TD(P, f='exp'),
           ),
 'exp2':
@@ -919,7 +927,7 @@ defdict = {
           docstrings.get('numpy._core.umath.exp2'),
           None,
           TD('efd', dispatch=[('loops_umath_fp', 'fd'), ('loops_half', 'e')]),
-          TD(inexact, f='exp2', astype={'e': 'f'}),
+          TD('g' + cmplx, f='exp2'),  # e/f/d via SIMD dispatch above
           TD(P, f='exp2'),
           ),
 'expm1':
@@ -927,7 +935,7 @@ defdict = {
           docstrings.get('numpy._core.umath.expm1'),
           None,
           TD('efd', dispatch=[('loops_umath_fp', 'fd'), ('loops_half', 'e')]),
-          TD(inexact, f='expm1', astype={'e': 'f'}),
+          TD('g' + cmplx, f='expm1'),  # e/f/d via SIMD dispatch above
           TD(P, f='expm1'),
           ),
 'log':
@@ -936,7 +944,7 @@ defdict = {
           None,
           TD('e', dispatch=[('loops_half', 'e')]),
           TD('fd', dispatch=[('loops_exponent_log', 'fd')]),
-          TD('fdg' + cmplx, f='log'),
+          TD('g' + cmplx, f='log'),  # f/d via SIMD dispatch above
           TD(P, f='log'),
           ),
 'log2':
@@ -944,7 +952,7 @@ defdict = {
           docstrings.get('numpy._core.umath.log2'),
           None,
           TD('efd', dispatch=[('loops_umath_fp', 'fd'), ('loops_half', 'e')]),
-          TD(inexact, f='log2', astype={'e': 'f'}),
+          TD('g' + cmplx, f='log2'),  # e/f/d via SIMD dispatch above
           TD(P, f='log2'),
           ),
 'log10':
@@ -952,7 +960,7 @@ defdict = {
           docstrings.get('numpy._core.umath.log10'),
           None,
           TD('efd', dispatch=[('loops_umath_fp', 'fd'), ('loops_half', 'e')]),
-          TD(inexact, f='log10', astype={'e': 'f'}),
+          TD('g' + cmplx, f='log10'),  # e/f/d via SIMD dispatch above
           TD(P, f='log10'),
           ),
 'log1p':
@@ -960,7 +968,7 @@ defdict = {
           docstrings.get('numpy._core.umath.log1p'),
           None,
           TD('efd', dispatch=[('loops_umath_fp', 'fd'), ('loops_half', 'e')]),
-          TD(inexact, f='log1p', astype={'e': 'f'}),
+          TD('g' + cmplx, f='log1p'),  # e/f/d via SIMD dispatch above
           TD(P, f='log1p'),
           ),
 'sqrt':
@@ -969,7 +977,7 @@ defdict = {
           None,
           TD('e', f='sqrt', astype={'e': 'f'}),
           TD(inexactvec, dispatch=[('loops_unary_fp', 'fd')]),
-          TD('fdg' + cmplx, f='sqrt'),
+          TD('g' + cmplx, f='sqrt'),  # f/d via SIMD dispatch above
           TD(P, f='sqrt'),
           ),
 'cbrt':
@@ -977,7 +985,7 @@ defdict = {
           docstrings.get('numpy._core.umath.cbrt'),
           None,
           TD('efd', dispatch=[('loops_umath_fp', 'fd'), ('loops_half', 'e')]),
-          TD(flts, f='cbrt', astype={'e': 'f'}),
+          TD('g', f='cbrt'),  # e/f/d via SIMD dispatch above
           TD(P, f='cbrt'),
           ),
 'ceil':
@@ -987,7 +995,7 @@ defdict = {
           TD(bints),
           TD('e', f='ceil', astype={'e': 'f'}),
           TD(inexactvec, dispatch=[('loops_unary_fp', 'fd')]),
-          TD('fdg', f='ceil'),
+          TD('g', f='ceil'),  # f/d via SIMD dispatch above
           TD(O, f='npy_ObjectCeil'),
           ),
 'trunc':
@@ -997,7 +1005,7 @@ defdict = {
           TD(bints),
           TD('e', f='trunc', astype={'e': 'f'}),
           TD(inexactvec, dispatch=[('loops_unary_fp', 'fd')]),
-          TD('fdg', f='trunc'),
+          TD('g', f='trunc'),  # f/d via SIMD dispatch above
           TD(O, f='npy_ObjectTrunc'),
           ),
 'fabs':
@@ -1015,7 +1023,7 @@ defdict = {
           TD(bints),
           TD('e', f='floor', astype={'e': 'f'}),
           TD(inexactvec, dispatch=[('loops_unary_fp', 'fd')]),
-          TD('fdg', f='floor'),
+          TD('g', f='floor'),  # f/d via SIMD dispatch above
           TD(O, f='npy_ObjectFloor'),
           ),
 'rint':
@@ -1024,7 +1032,7 @@ defdict = {
           None,
           TD('e', f='rint', astype={'e': 'f'}),
           TD(inexactvec, dispatch=[('loops_unary_fp', 'fd')]),
-          TD('fdg' + cmplx, f='rint'),
+          TD('g' + cmplx, f='rint'),  # f/d via SIMD dispatch above
           TD(P, f='rint'),
           ),
 'arctan2':
