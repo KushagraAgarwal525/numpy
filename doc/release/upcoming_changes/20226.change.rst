@@ -1,0 +1,6 @@
+`arange` length is exact for large integer arguments
+----------------------------------------------------
+`numpy.arange` now computes its output length with exact integer arithmetic
+when ``start``, ``stop``, and ``step`` are integer-like. Previously the length
+was derived via float64 division, which could drop elements for magnitudes
+above ``2**53``.

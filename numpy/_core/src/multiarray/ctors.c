@@ -3087,6 +3087,141 @@ _arange_safe_ceil_to_intp(double value)
 }
 
 
+/*
+ * Exact arange length for integer-like (stop - start) and step, matching
+ * Python's range(). Avoids float64 TrueDivide, which loses precision for
+ * magnitudes above 2**53 (gh-20226, gh-27985).
+ *
+ * next is (stop - start). Returns -1 on error (exception set), or the
+ * non-negative length. Step zero raises ZeroDivisionError via FloorDivide.
+ */
+static npy_intp
+_calc_length_integer(PyObject *next, PyObject *step)
+{
+    PyObject *next_idx = NULL, *step_idx = NULL;
+    PyObject *zero = NULL, *one = NULL, *tmp = NULL, *len_obj = NULL;
+    npy_intp len;
+    int step_sign, next_cmp;
+
+    next_idx = PyNumber_Index(next);
+    if (next_idx == NULL) {
+        return -1;
+    }
+    step_idx = PyNumber_Index(step);
+    if (step_idx == NULL) {
+        Py_DECREF(next_idx);
+        return -1;
+    }
+
+    zero = PyLong_FromLong(0);
+    one = PyLong_FromLong(1);
+    if (zero == NULL || one == NULL) {
+        goto fail;
+    }
+
+    step_sign = PyObject_RichCompareBool(step_idx, zero, Py_GT);
+    if (step_sign == -1) {
+        goto fail;
+    }
+    if (step_sign == 1) {
+        /* positive step: empty if next <= 0, else 1 + (next - 1) // step */
+        next_cmp = PyObject_RichCompareBool(next_idx, zero, Py_LE);
+        if (next_cmp == -1) {
+            goto fail;
+        }
+        if (next_cmp == 1) {
+            len = 0;
+            goto finish;
+        }
+        tmp = PyNumber_Subtract(next_idx, one);
+        if (tmp == NULL) {
+            goto fail;
+        }
+        len_obj = PyNumber_FloorDivide(tmp, step_idx);
+        Py_DECREF(tmp);
+        tmp = NULL;
+        if (len_obj == NULL) {
+            goto fail;
+        }
+        Py_SETREF(len_obj, PyNumber_Add(len_obj, one));
+        if (len_obj == NULL) {
+            goto fail;
+        }
+    }
+    else {
+        step_sign = PyObject_RichCompareBool(step_idx, zero, Py_LT);
+        if (step_sign == -1) {
+            goto fail;
+        }
+        if (step_sign == 0) {
+            /* step == 0 */
+            PyErr_SetString(PyExc_ZeroDivisionError,
+                            "Division by zero");
+            goto fail;
+        }
+        /* negative step: empty if next >= 0, else 1 + (next + 1) // step */
+        next_cmp = PyObject_RichCompareBool(next_idx, zero, Py_GE);
+        if (next_cmp == -1) {
+            goto fail;
+        }
+        if (next_cmp == 1) {
+            len = 0;
+            goto finish;
+        }
+        tmp = PyNumber_Add(next_idx, one);
+        if (tmp == NULL) {
+            goto fail;
+        }
+        len_obj = PyNumber_FloorDivide(tmp, step_idx);
+        Py_DECREF(tmp);
+        tmp = NULL;
+        if (len_obj == NULL) {
+            goto fail;
+        }
+        Py_SETREF(len_obj, PyNumber_Add(len_obj, one));
+        if (len_obj == NULL) {
+            goto fail;
+        }
+    }
+
+    len = PyLong_AsSsize_t(len_obj);
+    if (len == -1 && PyErr_Occurred()) {
+        /* Map to OverflowError so ArangeObj can turn it into ValueError */
+        if (PyErr_ExceptionMatches(PyExc_OverflowError)) {
+            /* already OverflowError from PyLong_AsSsize_t */
+        }
+        else {
+            PyErr_SetString(PyExc_OverflowError,
+                    "arange: overflow while computing length");
+        }
+        goto fail;
+    }
+    if (len < 0) {
+        /* Should not happen for valid range math; treat as overflow. */
+        PyErr_SetString(PyExc_OverflowError,
+                "arange: overflow while computing length");
+        goto fail;
+    }
+
+ finish:
+    Py_XDECREF(len_obj);
+    Py_XDECREF(one);
+    Py_XDECREF(zero);
+    Py_DECREF(step_idx);
+    Py_DECREF(next_idx);
+    return len;
+
+ fail:
+    Py_XDECREF(len_obj);
+    Py_XDECREF(tmp);
+    Py_XDECREF(one);
+    Py_XDECREF(zero);
+    Py_XDECREF(step_idx);
+    Py_XDECREF(next_idx);
+    return -1;
+}
+
+
 /*NUMPY_API
   Arange,
 */
@@ -3194,6 +3329,28 @@ _calc_length(PyObject *start, PyObject *stop, PyObject *step, PyObject **next, i
                             "instead of a tuple.");
         }
         return -1;
+    }
+
+    /*
+     * When (stop - start) and step are both integer-like, compute the length
+     * with exact integer arithmetic (same as Python's range). The float path
+     * below loses precision for |values| > 2**53 (gh-20226, gh-27985).
+     * Complex and non-integral inputs keep the historical float/complex path.
+     */
+    if (!cmplx && PyIndex_Check(*next) && PyIndex_Check(step)) {
+        len = _calc_length_integer(*next, step);
+        Py_DECREF(*next);
+        *next = NULL;
+        if (error_converting(len)) {
+            return -1;
+        }
+        if (len > 0) {
+            *next = PyNumber_Add(start, step);
+            if (!*next) {
+                return -1;
+            }
+        }
+        return len;
     }
 
     zero = PyLong_FromLong(0);
