@@ -244,8 +244,18 @@ get_initial_from_ufunc(
         }
     }
     else if (context->descriptors[0]->type_num == NPY_OBJECT
-             && !reduction_is_empty) {
-        /* Allows `sum([object()])` to work, but use 0 when empty. */
+             && !reduction_is_empty
+             && ((PyUFuncObject *)context->caller)->obj == NULL) {
+        /*
+         * Builtin reductions like ``np.add`` carry a Zero/One identity, but
+         * for object arrays that identity is suppressed for non-empty
+         * reductions so ``sum([object()])`` starts from the first element
+         * rather than ``0 + object()``.  Empty reductions still use it.
+         *
+         * ``np.frompyfunc`` sets ``ufunc->obj`` to the Python callable and
+         * must honor an explicit ``identity=`` for ``where=`` masks (and
+         * any other path that needs an initial).  See gh-24530.
+         */
         Py_DECREF(identity_obj);
         return 0;
     }

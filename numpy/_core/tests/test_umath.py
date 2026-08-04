@@ -4738,6 +4738,46 @@ class TestFrompyfunc:
         )
         assert_raises(ValueError, lambda: mul_ufunc.reduce([]))
 
+    def test_identity_with_where(self):
+        # gh-24530: frompyfunc identity must be honored for where= masks
+        x = np.arange(10)
+        mask = x % 2 == 0
+        my_add = np.frompyfunc(operator.add, nin=2, nout=1, identity=0)
+        assert_equal(my_add.reduce(x, where=mask), 20)
+        assert_equal(my_add.reduce(x.astype(object), where=mask), 20)
+
+        # Partial where on a 2-D reduce
+        a = np.arange(6).reshape(2, 3)
+        where = np.array([[True, False, True],
+                          [False, True, True]])
+        my_mul = np.frompyfunc(operator.mul, nin=2, nout=1, identity=1)
+        assert_equal(my_mul.reduce(a, axis=1, where=where), [0 * 2, 4 * 5])
+
+        # Without an identity, where= still requires initial=
+        no_id = np.frompyfunc(operator.add, nin=2, nout=1)
+        assert_raises(ValueError, lambda: no_id.reduce(x, where=mask))
+        assert_equal(no_id.reduce(x, where=mask, initial=0), 20)
+
+        # Builtin object add still suppresses its Zero identity for non-empty
+        # reductions (sum([object()]) starts from the first element).  where=
+        # therefore still needs an explicit initial=.
+        class NoRAdd:
+            def __radd__(self, other):
+                raise TypeError(f"cannot radd {other!r}")
+
+            def __add__(self, other):
+                return ("ok", other)
+
+        weird = np.array([NoRAdd(), 1], dtype=object)
+        assert_equal(np.add.reduce(weird), ("ok", 1))
+        assert_raises(
+            ValueError,
+            lambda: np.add.reduce(x.astype(object), where=mask),
+        )
+        assert_equal(
+            np.add.reduce(x.astype(object), where=mask, initial=0),
+            20,
+        )
 
 def _check_branch_cut(f, x0, dx, re_sign=1, im_sign=-1, sig_zero_ok=False,
                       dtype=complex):
