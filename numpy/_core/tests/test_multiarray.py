@@ -9996,7 +9996,8 @@ class TestArrayAttributeDeletion:
     def test_multiarray_writable_attributes_deletion(self):
         # ticket #2046, should not seqfault, raise AttributeError
         a = np.ones(2)
-        attr = ['shape', 'strides', 'data', 'dtype', 'real', 'imag', 'flat']
+        attr = ['shape', 'strides', 'data', 'dtype', 'real', 'imag', 'flat',
+                'T', 'mT']
         with warnings.catch_warnings():
             warnings.filterwarnings(
                 'ignore', "Assigning the 'data' attribute", DeprecationWarning)
@@ -10006,7 +10007,7 @@ class TestArrayAttributeDeletion:
     def test_multiarray_not_writable_attributes_deletion(self):
         a = np.ones(2)
         attr = ["ndim", "flags", "itemsize", "size", "nbytes", "base",
-                "ctypes", "T", "__array_interface__", "__array_struct__",
+                "ctypes", "__array_interface__", "__array_struct__",
                 "__array_priority__", "__array_finalize__"]
         for s in attr:
             assert_raises(AttributeError, delattr, a, s)
