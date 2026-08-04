@@ -140,6 +140,7 @@ typedef struct npy_static_pydata_struct {
     PyObject *math_ceil_func;
     PyObject *math_trunc_func;
     PyObject *math_gcd_func;
+    PyObject *builtins_round_func;
     PyObject *os_PathLike;
     PyObject *os_fspath;
     PyObject *format_options;

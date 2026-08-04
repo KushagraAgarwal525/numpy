@@ -565,6 +565,95 @@ PyArray_Round(PyArrayObject *a, int decimals, PyArrayObject *out)
                         "invalid output shape");
         return NULL;
     }
+    /*
+     * Object arrays should use the Python round protocol (__round__),
+     * matching floor/ceil/trunc.  decimals == 0 goes through rint;
+     * nonzero decimals must call round(x, decimals) elementwise because
+     * the float scale/rint/unscale path does not apply to arbitrary objects.
+     */
+    if (PyArray_ISOBJECT(a)) {
+        if (decimals == 0) {
+            if (out) {
+                return PyObject_CallFunction(n_ops.rint, "OO", a, out);
+            }
+            return PyObject_CallFunction(n_ops.rint, "O", a);
+        }
+        else {
+            PyArrayIterObject *it_in = NULL, *it_out = NULL;
+            PyObject *decimals_obj = NULL;
+
+            if (out == NULL) {
+                Py_INCREF(PyArray_DESCR(a));
+                out = (PyArrayObject *)PyArray_NewFromDescr(
+                        Py_TYPE(a), PyArray_DESCR(a),
+                        PyArray_NDIM(a), PyArray_DIMS(a),
+                        NULL, NULL,
+                        PyArray_ISFORTRAN(a) ? NPY_ARRAY_F_CONTIGUOUS : 0,
+                        (PyObject *)a);
+                if (out == NULL) {
+                    return NULL;
+                }
+            }
+            else {
+                Py_INCREF(out);
+            }
+
+            decimals_obj = PyLong_FromLong(decimals);
+            if (decimals_obj == NULL) {
+                Py_DECREF(out);
+                return NULL;
+            }
+
+            it_in = (PyArrayIterObject *)PyArray_IterNew((PyObject *)a);
+            if (it_in == NULL) {
+                Py_DECREF(decimals_obj);
+                Py_DECREF(out);
+                return NULL;
+            }
+            it_out = (PyArrayIterObject *)PyArray_IterNew((PyObject *)out);
+            if (it_out == NULL) {
+                Py_DECREF(it_in);
+                Py_DECREF(decimals_obj);
+                Py_DECREF(out);
+                return NULL;
+            }
+
+            while (it_in->index < it_in->size) {
+                PyObject *item = *((PyObject **)it_in->dataptr);
+                PyObject *res;
+
+                if (item == NULL) {
+                    item = Py_None;
+                }
+                res = PyObject_CallFunctionObjArgs(
+                        npy_static_pydata.builtins_round_func,
+                        item, decimals_obj, NULL);
+                if (res == NULL) {
+                    Py_DECREF(it_in);
+                    Py_DECREF(it_out);
+                    Py_DECREF(decimals_obj);
+                    Py_DECREF(out);
+                    return NULL;
+                }
+                if (PyArray_SETITEM(out, it_out->dataptr, res) < 0) {
+                    Py_DECREF(res);
+                    Py_DECREF(it_in);
+                    Py_DECREF(it_out);
+                    Py_DECREF(decimals_obj);
+                    Py_DECREF(out);
+                    return NULL;
+                }
+                Py_DECREF(res);
+                PyArray_ITER_NEXT(it_in);
+                PyArray_ITER_NEXT(it_out);
+            }
+
+            Py_DECREF(it_in);
+            Py_DECREF(it_out);
+            Py_DECREF(decimals_obj);
+            return (PyObject *)out;
+        }
+    }
     if (PyArray_ISCOMPLEX(a)) {
         PyObject *part;
         PyObject *round_part;
