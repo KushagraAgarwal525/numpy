@@ -4445,7 +4445,6 @@ class TestRoundingFunctions:
     def test_object_python_numeric(self):
         """Object arrays of built-in / stdlib numeric types use __round__."""
         from decimal import Decimal
-        from fractions import Fraction
 
         floats = np.array([1.5, 2.5, 3.5], dtype=object)
         assert_equal(np.rint(floats), [2, 2, 4])
