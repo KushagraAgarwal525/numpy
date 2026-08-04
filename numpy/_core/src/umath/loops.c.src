@@ -1037,11 +1037,14 @@ TIMEDELTA_dm_m_multiply(char **args, npy_intp const *dimensions, npy_intp const 
     }
 }
 
+/*
+ * True-divide timedelta by int64 (truncates toward zero).
+ * NaT dividend never sets divbyzero, matching float NaN rules (gh-17831).
+ */
 /* Note: Assuming 'q' == NPY_LONGLONG */
 NPY_NO_EXPORT void
 TIMEDELTA_mq_m_divide(char **args, npy_intp const *dimensions, npy_intp const *steps, void *NPY_UNUSED(func))
 {
-    /* NOTE: This code is similar to array floor divide */
     BINARY_DEFS
 
     /* When the divisor is a constant, use libdivide for faster division */
@@ -1053,10 +1056,12 @@ TIMEDELTA_mq_m_divide(char **args, npy_intp const *dimensions, npy_intp const *s
 
         const npy_int64 in2 = *(npy_int64 *)ip2;
 
-        /* If divisor is 0, we need not compute anything */
         if (in2 == 0) {
-            npy_set_floatstatus_divbyzero();
             BINARY_LOOP_SLIDING {
+                const npy_timedelta in1 = *(npy_timedelta *)ip1;
+                if (in1 != NPY_DATETIME_NAT) {
+                    npy_set_floatstatus_divbyzero();
+                }
                 *((npy_timedelta *)op1) = NPY_DATETIME_NAT;
             }
         }
@@ -1077,11 +1082,80 @@ TIMEDELTA_mq_m_divide(char **args, npy_intp const *dimensions, npy_intp const *s
         BINARY_LOOP_SLIDING {
             const npy_timedelta in1 = *(npy_timedelta *)ip1;
             const npy_int64 in2 = *(npy_int64 *)ip2;
-            if (in1 == NPY_DATETIME_NAT || in2 == 0) {
+            if (in1 == NPY_DATETIME_NAT) {
+                *((npy_timedelta *)op1) = NPY_DATETIME_NAT;
+            }
+            else if (in2 == 0) {
+                npy_set_floatstatus_divbyzero();
                 *((npy_timedelta *)op1) = NPY_DATETIME_NAT;
             }
             else {
                 *((npy_timedelta *)op1) = in1 / in2;
+            }
+        }
+    }
+}
+
+/*
+ * Floor-divide timedelta by int64 (toward -inf). Previously aliased to the
+ * truncating true-divide loop (gh-17831).
+ */
+NPY_NO_EXPORT void
+TIMEDELTA_mq_m_floor_divide(char **args, npy_intp const *dimensions, npy_intp const *steps, void *NPY_UNUSED(func))
+{
+    BINARY_DEFS
+
+    if (steps[1] == 0) {
+        if (n == 0) {
+            return;
+        }
+
+        const npy_int64 in2 = *(npy_int64 *)ip2;
+
+        if (in2 == 0) {
+            BINARY_LOOP_SLIDING {
+                const npy_timedelta in1 = *(npy_timedelta *)ip1;
+                if (in1 != NPY_DATETIME_NAT) {
+                    npy_set_floatstatus_divbyzero();
+                }
+                *((npy_timedelta *)op1) = NPY_DATETIME_NAT;
+            }
+        }
+        else {
+            struct libdivide_s64_t fast_d = libdivide_s64_gen(in2);
+            BINARY_LOOP_SLIDING {
+                const npy_timedelta in1 = *(npy_timedelta *)ip1;
+                if (in1 == NPY_DATETIME_NAT) {
+                    *((npy_timedelta *)op1) = NPY_DATETIME_NAT;
+                }
+                else {
+                    npy_int64 quo = libdivide_s64_do(in1, &fast_d);
+                    /* Negative quotients need to be rounded down */
+                    if (((in1 > 0) != (in2 > 0)) && (quo * in2 != in1)) {
+                        quo = quo - 1;
+                    }
+                    *((npy_timedelta *)op1) = quo;
+                }
+            }
+        }
+    }
+    else {
+        BINARY_LOOP_SLIDING {
+            const npy_timedelta in1 = *(npy_timedelta *)ip1;
+            const npy_int64 in2 = *(npy_int64 *)ip2;
+            if (in1 == NPY_DATETIME_NAT) {
+                *((npy_timedelta *)op1) = NPY_DATETIME_NAT;
+            }
+            else if (in2 == 0) {
+                npy_set_floatstatus_divbyzero();
+                *((npy_timedelta *)op1) = NPY_DATETIME_NAT;
+            }
+            else {
+                npy_int64 quo = in1 / in2;
+                if (((in1 > 0) != (in2 > 0)) && (quo * in2 != in1)) {
+                    quo = quo - 1;
+                }
+                *((npy_timedelta *)op1) = quo;
             }
         }
     }
@@ -1098,6 +1172,27 @@ TIMEDELTA_md_m_divide(char **args, npy_intp const *dimensions, npy_intp const *s
         }
         else {
             double result = in1 / in2;
+            if (npy_isfinite(result)) {
+                *((npy_timedelta *)op1) = (npy_timedelta)result;
+            }
+            else {
+                *((npy_timedelta *)op1) = NPY_DATETIME_NAT;
+            }
+        }
+    }
+}
+
+NPY_NO_EXPORT void
+TIMEDELTA_md_m_floor_divide(char **args, npy_intp const *dimensions, npy_intp const *steps, void *NPY_UNUSED(func))
+{
+    BINARY_LOOP {
+        const npy_timedelta in1 = *(npy_timedelta *)ip1;
+        const double in2 = *(double *)ip2;
+        if (in1 == NPY_DATETIME_NAT) {
+            *((npy_timedelta *)op1) = NPY_DATETIME_NAT;
+        }
+        else {
+            double result = npy_floor(in1 / in2);
             if (npy_isfinite(result)) {
                 *((npy_timedelta *)op1) = (npy_timedelta)result;
             }
@@ -1168,8 +1263,14 @@ TIMEDELTA_mm_q_floor_divide(char **args, npy_intp const *dimensions, npy_intp co
 
         /* If divisor is 0 or NAT, we need not compute anything */
         if (in2 == 0) {
-            npy_set_floatstatus_divbyzero();
             BINARY_LOOP_SLIDING {
+                const npy_timedelta in1 = *(npy_timedelta *)ip1;
+                if (in1 == NPY_DATETIME_NAT) {
+                    npy_set_floatstatus_invalid();
+                }
+                else {
+                    npy_set_floatstatus_divbyzero();
+                }
                 *((npy_int64 *)op1) = 0;
             }
         }
@@ -1188,12 +1289,13 @@ TIMEDELTA_mm_q_floor_divide(char **args, npy_intp const *dimensions, npy_intp co
                     *((npy_int64 *)op1) = 0;
                 }
                 else {
-                    *((npy_int64 *)op1) = libdivide_s64_do(in1, &fast_d);
+                    npy_int64 quo = libdivide_s64_do(in1, &fast_d);
 
                     /* Negative quotients needs to be rounded down */
-                    if (((in1 > 0) != (in2 > 0)) && (*((npy_int64 *)op1) * in2 != in1)) {
-                        *((npy_int64 *)op1) = *((npy_int64 *)op1) - 1;
+                    if (((in1 > 0) != (in2 > 0)) && (quo * in2 != in1)) {
+                        quo = quo - 1;
                     }
+                    *((npy_int64 *)op1) = quo;
                 }
             }
         }
@@ -1211,12 +1313,13 @@ TIMEDELTA_mm_q_floor_divide(char **args, npy_intp const *dimensions, npy_intp co
                 *((npy_int64 *)op1) = 0;
             }
             else {
-                *((npy_int64 *)op1) = in1/in2;
+                npy_int64 quo = in1 / in2;
 
                 /* Negative quotients needs to be rounded down */
-                if (((in1 > 0) != (in2 > 0)) && (*((npy_int64 *)op1) * in2 != in1)) {
-                    *((npy_int64 *)op1) = *((npy_int64 *)op1) - 1;
+                if (((in1 > 0) != (in2 > 0)) && (quo * in2 != in1)) {
+                    quo = quo - 1;
                 }
+                *((npy_int64 *)op1) = quo;
             }
         }
     }
