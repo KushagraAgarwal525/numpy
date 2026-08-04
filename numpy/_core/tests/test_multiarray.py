@@ -10986,6 +10986,17 @@ class TestArange:
         expected = np.array([0, 1 + 1j, 2 + 2j, 3 + 3j], dtype=out.dtype)
         assert_array_equal(out, expected)
 
+    @pytest.mark.parametrize("dtype", [np.complex64, np.complex128])
+    def test_complex_explicit_dtype(self, dtype):
+        assert_array_equal(
+            np.arange(0, 10, 2, dtype=dtype),
+            np.array([0, 2, 4, 6, 8], dtype=dtype),
+        )
+        assert_array_equal(
+            np.arange(0, 10j, 2j, dtype=dtype),
+            np.array([0, 2j, 4j, 6j, 8j], dtype=dtype),
+        )
+
     def test_complex_empty_and_singleton(self):
         assert_array_equal(np.arange(5 + 0j, 5 + 0j, 1 + 0j), np.array([], dtype=complex))
         assert_array_equal(np.arange(5 + 0j, 6 + 0j, 1 + 0j), np.array([5 + 0j]))
