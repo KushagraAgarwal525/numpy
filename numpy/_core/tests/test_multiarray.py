@@ -11007,13 +11007,14 @@ class TestArange:
         assert_array_equal(actual, expected)
 
     def test_arange_integer_length_last_element_below_stop(self):
-        # Explicit gh-20226 regression: last + step must stay strictly
-        # below stop for a positive step.
+        # Explicit gh-20226 regression: length matches range(), and the
+        # final element is the last value strictly before stop.
         start, stop, step = 0, 108086391056891901, 1080863910568919
         arr = np.arange(start, stop, step, dtype=np.uint64)
-        assert arr.size == 101
-        assert int(arr[-1]) + step < stop
-        assert int(arr[-1]) + step == stop - 1
+        assert arr.size == len(range(start, stop, step)) == 101
+        assert int(arr[-1]) < stop
+        assert int(arr[-1]) + step >= stop
+        assert int(arr[-1]) == stop - 1
 
     @pytest.mark.parametrize("which", [0, 1, 2])
     def test_error_paths_and_promotion(self, which):
