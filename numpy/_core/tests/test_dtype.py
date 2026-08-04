@@ -476,6 +476,56 @@ class TestRecord:
                        'formats': ['i1', 'O'],
                        'offsets': [np.dtype('intp').itemsize, 0]})
 
+    def test_structured_dtype_size_overflow(self):
+        # gh-12343: field offsets/itemsize are C ints; reject overflow instead
+        # of constructing invalid dtypes (negative offsets / tiny itemsize).
+        big = np.iinfo(np.intc).max  # typically 2**31 - 1
+
+        # A single max-sized bool subarray field is OK.
+        dt_ok = np.dtype([('a', np.bool_, (big,))])
+        assert dt_ok.itemsize == big
+        assert dt_ok.fields['a'][1] == 0
+
+        # Two such fields would overflow the running itemsize.
+        with pytest.raises(ValueError, match="does not fit into a C int"):
+            np.dtype([
+                ('a', np.bool_, (big,)),
+                ('b', np.bool_, (big,)),
+            ])
+
+        # Original report also included an object field after the overflow.
+        with pytest.raises(ValueError, match="does not fit into a C int"):
+            np.dtype([
+                ('a', np.bool_, (big,)),
+                ('b', np.bool_, (big,)),
+                ('c', object),
+            ])
+
+        # Dict form without explicit offsets (consecutive layout).
+        with pytest.raises(ValueError, match="does not fit into a C int"):
+            np.dtype({
+                'names': ['a', 'b'],
+                'formats': [(np.bool_, (big,)), (np.bool_, (big,))],
+            })
+
+        # Explicit offsets whose end (offset + elsize) overflows.
+        with pytest.raises(ValueError, match="does not fit into a C int"):
+            np.dtype({
+                'names': ['a', 'b'],
+                'formats': ['i1', 'i1'],
+                'offsets': [big - 1, big],
+            })
+
+        # Comma-string path (uses formats-list construction internally).
+        with pytest.raises(ValueError, match="does not fit into a C int"):
+            np.dtype(f"({big},)?,({big},)?")
+
+        # Near-max consecutive layout that still fits must succeed.
+        almost = big - 1
+        dt_fit = np.dtype([('a', np.bool_, (almost,)), ('b', np.bool_)])
+        assert dt_fit.itemsize == big
+        assert dt_fit.fields['b'][1] == almost
+
     @pytest.mark.parametrize(["obj", "dtype", "expected"],
         [([], ("2f4"), np.empty((0, 2), dtype="f4")),
          (3, "(3,)f4", [3, 3, 3]),

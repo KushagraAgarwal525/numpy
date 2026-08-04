@@ -815,6 +815,16 @@ void_ensure_canonical(_PyArray_LegacyDescr *self)
             PyTuple_SET_ITEM(new_tuple, 0, (PyObject *)field_descr);
 
             if (aligned) {
+                int tmp;
+                if (npy_add_with_overflow_int(
+                            &tmp, totalsize, field_descr->alignment - 1)) {
+                    PyErr_SetString(PyExc_ValueError,
+                            "structured dtype size in bytes does not "
+                            "fit into a C int.");
+                    Py_DECREF(new_tuple);
+                    Py_DECREF(new);
+                    return NULL;
+                }
                 totalsize = NPY_NEXT_ALIGNED_OFFSET(
                         totalsize, field_descr->alignment);
                 maxalign = PyArray_MAX(maxalign, field_descr->alignment);
@@ -843,9 +853,26 @@ void_ensure_canonical(_PyArray_LegacyDescr *self)
                 return NULL;
             }
             Py_DECREF(new_tuple);  /* Reference now owned by PyDataType_FIELDS(new) */
-            totalsize += field_descr->elsize;
+            if (npy_add_with_overflow_int(&totalsize, totalsize,
+                                          field_descr->elsize)) {
+                PyErr_SetString(PyExc_ValueError,
+                        "structured dtype size in bytes does not "
+                        "fit into a C int.");
+                Py_DECREF(new);
+                return NULL;
+            }
         }
-        totalsize = NPY_NEXT_ALIGNED_OFFSET(totalsize, maxalign);
+        if (maxalign > 1) {
+            int tmp;
+            if (npy_add_with_overflow_int(&tmp, totalsize, maxalign - 1)) {
+                PyErr_SetString(PyExc_ValueError,
+                        "structured dtype size in bytes does not "
+                        "fit into a C int.");
+                Py_DECREF(new);
+                return NULL;
+            }
+            totalsize = NPY_NEXT_ALIGNED_OFFSET(totalsize, maxalign);
+        }
         new->elsize = totalsize;
         new->alignment = maxalign;
         return (PyArray_Descr *)new;
