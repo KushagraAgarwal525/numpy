@@ -1854,31 +1854,44 @@ class TestVectorize:
         assert f([None]).item() is y
 
     def test_parse_gufunc_signature(self):
-        assert_equal(nfb._parse_gufunc_signature('(x)->()'), ([('x',)], [()]))
+        assert_equal(nfb._parse_gufunc_signature('(x)->()'),
+                     ([('x',)], [()], frozenset()))
         assert_equal(nfb._parse_gufunc_signature('(x,y)->()'),
-                     ([('x', 'y')], [()]))
+                     ([('x', 'y')], [()], frozenset()))
         assert_equal(nfb._parse_gufunc_signature('(x),(y)->()'),
-                     ([('x',), ('y',)], [()]))
+                     ([('x',), ('y',)], [()], frozenset()))
         assert_equal(nfb._parse_gufunc_signature('(x)->(y)'),
-                     ([('x',)], [('y',)]))
+                     ([('x',)], [('y',)], frozenset()))
         assert_equal(nfb._parse_gufunc_signature('(x)->(y),()'),
-                     ([('x',)], [('y',), ()]))
+                     ([('x',)], [('y',), ()], frozenset()))
         assert_equal(nfb._parse_gufunc_signature('(),(a,b,c),(d)->(d,e)'),
-                     ([(), ('a', 'b', 'c'), ('d',)], [('d', 'e')]))
+                     ([(), ('a', 'b', 'c'), ('d',)], [('d', 'e')], frozenset()))
 
         # Tests to check if whitespaces are ignored
-        assert_equal(nfb._parse_gufunc_signature('(x )->()'), ([('x',)], [()]))
+        assert_equal(nfb._parse_gufunc_signature('(x )->()'),
+                     ([('x',)], [()], frozenset()))
         assert_equal(nfb._parse_gufunc_signature('( x , y )->(  )'),
-                     ([('x', 'y')], [()]))
+                     ([('x', 'y')], [()], frozenset()))
         assert_equal(nfb._parse_gufunc_signature('(x),( y) ->()'),
-                     ([('x',), ('y',)], [()]))
+                     ([('x',), ('y',)], [()], frozenset()))
         assert_equal(nfb._parse_gufunc_signature('(  x)-> (y )  '),
-                     ([('x',)], [('y',)]))
+                     ([('x',)], [('y',)], frozenset()))
         assert_equal(nfb._parse_gufunc_signature(' (x)->( y),( )'),
-                     ([('x',)], [('y',), ()]))
+                     ([('x',)], [('y',), ()], frozenset()))
         assert_equal(nfb._parse_gufunc_signature(
                      '(  ), ( a,  b,c )  ,(  d)   ->   (d  ,  e)'),
-                     ([(), ('a', 'b', 'c'), ('d',)], [('d', 'e')]))
+                     ([(), ('a', 'b', 'c'), ('d',)], [('d', 'e')], frozenset()))
+
+        # Optional core dimensions (NEP 20 / gufunc ``?`` modifier)
+        assert_equal(
+            nfb._parse_gufunc_signature('(n?,k),(k,m?)->(n?,m?)'),
+            ([('n', 'k'), ('k', 'm')], [('n', 'm')], frozenset({'n', 'm'})))
+        assert_equal(
+            nfb._parse_gufunc_signature('(n?)->(n?)'),
+            ([('n',)], [('n',)], frozenset({'n'})))
+        assert_equal(
+            nfb._parse_gufunc_signature('( n ? , k ),(k, m ?)->(n?,m?)'),
+            ([('n', 'k'), ('k', 'm')], [('n', 'm')], frozenset({'n', 'm'})))
 
         with assert_raises(ValueError):
             nfb._parse_gufunc_signature('(x)(y)->()')
@@ -1886,6 +1899,62 @@ class TestVectorize:
             nfb._parse_gufunc_signature('(x),(y)->')
         with assert_raises(ValueError):
             nfb._parse_gufunc_signature('((x))->(x)')
+        with assert_raises(ValueError):
+            nfb._parse_gufunc_signature('(n?),(n)->()')
+        with assert_raises(ValueError):
+            nfb._parse_gufunc_signature('(n),(n?)->()')
+
+    def test_signature_optional_matmul(self):
+        # Regression for gh-12712: vectorize must accept matmul-like signatures
+        # with optional core dimensions and match gufunc shape rules.
+        f = vectorize(np.matmul, signature='(n?,k),(k,m?)->(n?,m?)')
+
+        a2 = np.arange(6.).reshape(2, 3)
+        b2 = np.arange(12.).reshape(3, 4)
+        b1 = np.arange(3.)
+        a1 = np.arange(3.)
+
+        assert_array_equal(f(a2, b2), a2 @ b2)
+        assert_array_equal(f(a2, b1), a2 @ b1)
+        assert_array_equal(f(a1, b2), a1 @ b2)
+        assert_array_equal(f(a1, b1), a1 @ b1)
+
+        A = np.arange(30.).reshape(5, 2, 3)
+        B = np.arange(60.).reshape(5, 3, 4)
+        V = np.arange(15.).reshape(5, 3)
+        V1 = np.arange(3.)
+        assert_array_equal(f(A, B), A @ B)
+        assert_array_equal(f(A, V1), A @ V1)
+        assert_array_equal(f(V, B), V @ B)
+        assert_array_equal(f(V, V1), V @ V1)
+        # A (5,2,3) and V (5,3) both have enough dims for two core dims on the
+        # right operand, so V is treated as a matrix and matmul rejects it.
+        with assert_raises(ValueError):
+            f(A, V)
+
+    def test_signature_optional_mean(self):
+        def mean_or_pass(a):
+            a = np.asanyarray(a)
+            if a.ndim == 0:
+                return a
+            return a.mean(axis=-1)
+
+        # Optional core dim: scalars pass through; vectors reduce.
+        f = vectorize(mean_or_pass, signature='(n?)->()')
+        assert_array_equal(f(3.), 3.)
+        assert_array_equal(f([1., 3.]), 2.)
+        assert_array_equal(f([[1., 3.], [2., 4.]]), [2., 3.])
+
+    def test_signature_optional_insufficient_dims(self):
+        f = vectorize(lambda a: a, signature='(n,m)->(n,m)')
+        with assert_raises(ValueError):
+            f([1, 2, 3])
+
+        f_opt = vectorize(lambda a: a.sum(), signature='(n,m?)->()')
+        # 1-d is OK when m is optional; 0-d is not (n is required).
+        assert_array_equal(f_opt([1., 2., 3.]), 6.)
+        with assert_raises(ValueError):
+            f_opt(1.)
 
     def test_signature_simple(self):
         def addsubtract(a, b):

@@ -2177,12 +2177,14 @@ def place(arr, mask, vals):
     return _place(arr, mask, vals)
 
 
-# See https://docs.scipy.org/doc/numpy/reference/c-api.generalized-ufuncs.html
+# See https://docs.scipy.org/doc/numpy/reference/c-api/generalized-ufuncs.html
 _DIMENSION_NAME = r'\w+'
-_CORE_DIMENSION_LIST = f'(?:{_DIMENSION_NAME}(?:,{_DIMENSION_NAME})*)?'
+_DIMENSION = fr'{_DIMENSION_NAME}\??'
+_CORE_DIMENSION_LIST = f'(?:{_DIMENSION}(?:,{_DIMENSION})*)?'
 _ARGUMENT = fr'\({_CORE_DIMENSION_LIST}\)'
 _ARGUMENT_LIST = f'{_ARGUMENT}(?:,{_ARGUMENT})*'
 _SIGNATURE = f'^{_ARGUMENT_LIST}->{_ARGUMENT_LIST}$'
+_DIMENSION_TOKEN = re.compile(fr'({_DIMENSION_NAME})(\?)?')
 
 
 def _parse_gufunc_signature(signature):
@@ -2193,21 +2195,88 @@ def _parse_gufunc_signature(signature):
     ---------
     signature : string
         Generalized universal function signature, e.g., ``(m,n),(n,p)->(m,p)``
-        for ``np.matmul``.
+        or with optional core dimensions ``(m?,n),(n,p?)->(m?,p?)`` for
+        ``np.matmul``.
 
     Returns
     -------
-    Tuple of input and output core dimensions parsed from the signature, each
-    of the form List[Tuple[str, ...]].
+    input_core_dims : List[Tuple[str, ...]]
+        Core dimension names for each input argument (``?`` stripped).
+    output_core_dims : List[Tuple[str, ...]]
+        Core dimension names for each output argument (``?`` stripped).
+    optional_dims : frozenset of str
+        Dimension names marked optional with a trailing ``?``.
     """
     signature = re.sub(r'\s+', '', signature)
 
     if not re.match(_SIGNATURE, signature):
         raise ValueError(
             f'not a valid gufunc signature: {signature}')
-    return tuple([tuple(re.findall(_DIMENSION_NAME, arg))
-                  for arg in re.findall(_ARGUMENT, arg_list)]
-                 for arg_list in signature.split('->'))
+
+    optional_dims = set()
+    dim_optional = {}
+
+    def parse_arg_list(arg_list):
+        parsed = []
+        for arg in re.findall(_ARGUMENT, arg_list):
+            dims = []
+            for name, is_optional in _DIMENSION_TOKEN.findall(arg):
+                can_ignore = bool(is_optional)
+                if name in dim_optional and dim_optional[name] != can_ignore:
+                    if can_ignore:
+                        raise ValueError(
+                            f'not a valid gufunc signature: {signature!r}: '
+                            f'? cannot be used, name {name!r} already seen '
+                            f'without ?')
+                    raise ValueError(
+                        f'not a valid gufunc signature: {signature!r}: '
+                        f'? must be used, name {name!r} already seen with ?')
+                dim_optional[name] = can_ignore
+                if can_ignore:
+                    optional_dims.add(name)
+                dims.append(name)
+            parsed.append(tuple(dims))
+        return parsed
+
+    input_list, output_list = signature.split('->')
+    return (parse_arg_list(input_list),
+            parse_arg_list(output_list),
+            frozenset(optional_dims))
+
+
+def _resolve_optional_core_dims(args, input_core_dims, optional_dims):
+    """
+    Decide which optional core dimensions are missing, matching gufunc rules.
+
+    An optional core dimension is omitted when an operand does not have enough
+    dimensions; the dimension is then treated as missing for every operand that
+    uses it (see generalized ufunc docs for the ``?`` modifier).
+    """
+    if not optional_dims:
+        return frozenset(), [list(dims) for dims in input_core_dims]
+
+    can_ignore = set(optional_dims)
+    missing = set()
+    active = [list(dims) for dims in input_core_dims]
+
+    for i, arg in enumerate(args):
+        while arg.ndim < len(active[i]):
+            ignored = None
+            for dim in active[i]:
+                if dim in can_ignore:
+                    ignored = dim
+                    break
+            if ignored is None:
+                raise ValueError(
+                    f'{arg.ndim}-dimensional argument does not have enough '
+                    f'dimensions for all core dimensions {tuple(active[i])!r}')
+            can_ignore.remove(ignored)
+            missing.add(ignored)
+            for dims in active:
+                while ignored in dims:
+                    dims.remove(ignored)
+
+    return frozenset(missing), active
 
 
 def _update_dim_sizes(dim_sizes, arg, core_dims):
@@ -2220,8 +2289,8 @@ def _update_dim_sizes(dim_sizes, arg, core_dims):
         Sizes of existing core dimensions. Will be updated in-place.
     arg : ndarray
         Argument to examine.
-    core_dims : Tuple[str, ...]
-        Core dimensions for this argument.
+    core_dims : Sequence[str]
+        Core dimensions for this argument (optional dims already resolved).
     """
     if not core_dims:
         return
@@ -2230,7 +2299,7 @@ def _update_dim_sizes(dim_sizes, arg, core_dims):
     if arg.ndim < num_core_dims:
         raise ValueError(
             f'{arg.ndim}-dimensional argument does not have enough '
-            f'dimensions for all core dimensions {core_dims!r}')
+            f'dimensions for all core dimensions {tuple(core_dims)!r}')
 
     core_shape = arg.shape[-num_core_dims:]
     for dim, size in zip(core_dims, core_shape):
@@ -2244,7 +2313,7 @@ def _update_dim_sizes(dim_sizes, arg, core_dims):
             dim_sizes[dim] = size
 
 
-def _parse_input_dimensions(args, input_core_dims):
+def _parse_input_dimensions(args, input_core_dims, optional_dims=()):
     """
     Parse broadcast and core dimensions for vectorize with a signature.
 
@@ -2254,6 +2323,8 @@ def _parse_input_dimensions(args, input_core_dims):
         Tuple of input arguments to examine.
     input_core_dims : List[Tuple[str, ...]]
         List of core dimensions corresponding to each input.
+    optional_dims : Iterable[str], optional
+        Core dimension names marked optional with ``?`` in the signature.
 
     Returns
     -------
@@ -2261,10 +2332,17 @@ def _parse_input_dimensions(args, input_core_dims):
         Common shape to broadcast all non-core dimensions to.
     dim_sizes : Dict[str, int]
         Common sizes for named core dimensions.
+    active_input_core_dims : List[List[str]]
+        Core dimensions kept for each input after resolving optional dims.
+    missing_dims : frozenset of str
+        Optional core dimensions that were omitted.
     """
+    missing_dims, active_input_core_dims = _resolve_optional_core_dims(
+        args, input_core_dims, optional_dims)
+
     broadcast_args = []
     dim_sizes = {}
-    for arg, core_dims in zip(args, input_core_dims):
+    for arg, core_dims in zip(args, active_input_core_dims):
         _update_dim_sizes(dim_sizes, arg, core_dims)
         ndim = arg.ndim - len(core_dims)
         dummy_array = np.lib.stride_tricks.as_strided(0, arg.shape[:ndim])
@@ -2272,7 +2350,7 @@ def _parse_input_dimensions(args, input_core_dims):
     broadcast_shape = np.lib._stride_tricks_impl._broadcast_shape(
         *broadcast_args
     )
-    return broadcast_shape, dim_sizes
+    return broadcast_shape, dim_sizes, active_input_core_dims, missing_dims
 
 
 def _calculate_shapes(broadcast_shape, dim_sizes, list_of_core_dims):
@@ -2344,9 +2422,11 @@ class vectorize:
 
     signature : string, optional
         Generalized universal function signature, e.g., ``(m,n),(n)->(m)`` for
-        vectorized matrix-vector multiplication. If provided, ``pyfunc`` will
-        be called with (and expected to return) arrays with shapes given by the
-        size of corresponding core dimensions. By default, ``pyfunc`` is
+        vectorized matrix-vector multiplication. Optional core dimensions may
+        be marked with a trailing ``?`` as in ``(n?,k),(k,m?)->(n?,m?)`` (see
+        :doc:`/reference/c-api/generalized-ufuncs`). If provided, ``pyfunc``
+        will be called with (and expected to return) arrays with shapes given
+        by the size of corresponding core dimensions. By default, ``pyfunc`` is
         assumed to take scalars as input and output.
 
     Returns
@@ -2507,9 +2587,12 @@ class vectorize:
         self.excluded = set(excluded)
 
         if signature is not None:
-            self._in_and_out_core_dims = _parse_gufunc_signature(signature)
+            in_dims, out_dims, optional_dims = _parse_gufunc_signature(signature)
+            self._in_and_out_core_dims = (in_dims, out_dims)
+            self._optional_core_dims = optional_dims
         else:
             self._in_and_out_core_dims = None
+            self._optional_core_dims = frozenset()
 
     def _init_stage_2(self, pyfunc, *args, **kwargs):
         self.__name__ = pyfunc.__name__
@@ -2647,6 +2730,7 @@ class vectorize:
     def _vectorize_call_with_signature(self, func, args):
         """Vectorized call over positional arguments with a signature."""
         input_core_dims, output_core_dims = self._in_and_out_core_dims
+        optional_dims = self._optional_core_dims
 
         if len(args) != len(input_core_dims):
             raise TypeError(
@@ -2655,10 +2739,15 @@ class vectorize:
             )
         args = tuple(asanyarray(arg) for arg in args)
 
-        broadcast_shape, dim_sizes = _parse_input_dimensions(
-            args, input_core_dims)
+        (broadcast_shape, dim_sizes, active_input_core_dims,
+         missing_dims) = _parse_input_dimensions(
+            args, input_core_dims, optional_dims)
+        active_output_core_dims = [
+            [dim for dim in core_dims if dim not in missing_dims]
+            for core_dims in output_core_dims
+        ]
         input_shapes = _calculate_shapes(broadcast_shape, dim_sizes,
-                                         input_core_dims)
+                                         active_input_core_dims)
         args = [np.broadcast_to(arg, shape, subok=True)
                 for arg, shape in zip(args, input_shapes)]
 
@@ -2681,11 +2770,12 @@ class vectorize:
                 results = (results,)
 
             if outputs is None:
-                for result, core_dims in zip(results, output_core_dims):
+                for result, core_dims in zip(results, active_output_core_dims):
                     _update_dim_sizes(dim_sizes, result, core_dims)
 
                 outputs = _create_arrays(broadcast_shape, dim_sizes,
-                                         output_core_dims, otypes, results)
+                                         active_output_core_dims, otypes,
+                                         results)
 
             for output, result in zip(outputs, results):
                 output[index] = result
@@ -2696,13 +2786,13 @@ class vectorize:
                 raise ValueError('cannot call `vectorize` on size 0 inputs '
                                  'unless `otypes` is set')
             if builtins.any(dim not in dim_sizes
-                            for dims in output_core_dims
+                            for dims in active_output_core_dims
                             for dim in dims):
                 raise ValueError('cannot call `vectorize` with a signature '
                                  'including new output dimensions on size 0 '
                                  'inputs')
             outputs = _create_arrays(broadcast_shape, dim_sizes,
-                                     output_core_dims, otypes)
+                                     active_output_core_dims, otypes)
 
         return outputs[0] if nout == 1 else outputs
 
