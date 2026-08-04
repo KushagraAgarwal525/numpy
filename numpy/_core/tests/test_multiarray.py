@@ -10998,9 +10998,18 @@ class TestArange:
         )
 
     def test_complex_empty_and_singleton(self):
-        assert_array_equal(np.arange(5 + 0j, 5 + 0j, 1 + 0j), np.array([], dtype=complex))
-        assert_array_equal(np.arange(5 + 0j, 6 + 0j, 1 + 0j), np.array([5 + 0j]))
-        assert_array_equal(np.arange(5j, 5j, 1j), np.array([], dtype=complex))
+        assert_array_equal(
+            np.arange(5 + 0j, 5 + 0j, 1 + 0j),
+            np.array([], dtype=complex),
+        )
+        assert_array_equal(
+            np.arange(5 + 0j, 6 + 0j, 1 + 0j),
+            np.array([5 + 0j]),
+        )
+        assert_array_equal(
+            np.arange(5j, 5j, 1j),
+            np.array([], dtype=complex),
+        )
         assert_array_equal(np.arange(0j, 1j, 2j), np.array([0j]))
 
     def test_complex_requires_collinear_stop(self):
