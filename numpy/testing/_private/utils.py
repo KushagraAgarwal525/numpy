@@ -446,7 +446,7 @@ def assert_equal(actual, desired, err_msg='', verbose=True, *, strict=False):
             else:
                 raise AssertionError(msg)
 
-    except (TypeError, ValueError, NotImplementedError):
+    except (TypeError, ValueError, NotImplementedError, AttributeError):
         pass
 
     # Inf/nan/negative zero handling
@@ -473,7 +473,7 @@ def assert_equal(actual, desired, err_msg='', verbose=True, *, strict=False):
             if not signbit(desired) == signbit(actual):
                 raise AssertionError(msg)
 
-    except (TypeError, ValueError, NotImplementedError):
+    except (TypeError, ValueError, NotImplementedError, AttributeError):
         pass
 
     try:
