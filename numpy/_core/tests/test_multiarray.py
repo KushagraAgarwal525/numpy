@@ -10976,14 +10976,15 @@ class TestArange:
         start = dtype(0)
         stop = dtype(10)
         step = dtype(2)
-        expected = np.array([0, 2, 4, 6, 8], dtype=np.result_type(dtype))
-        assert_array_equal(np.arange(start, stop, step), expected)
+        # DescrFromObject promotes complex64 scalars to complex128.
+        out = np.arange(start, stop, step)
+        expected = np.array([0, 2, 4, 6, 8], dtype=out.dtype)
+        assert_array_equal(out, expected)
 
         # Diagonal step in the complex plane (still real-valued quotient).
-        assert_array_equal(
-            np.arange(dtype(0), dtype(4 + 4j), dtype(1 + 1j)),
-            np.array([0, 1 + 1j, 2 + 2j, 3 + 3j], dtype=np.result_type(dtype)),
-        )
+        out = np.arange(dtype(0), dtype(4 + 4j), dtype(1 + 1j))
+        expected = np.array([0, 1 + 1j, 2 + 2j, 3 + 3j], dtype=out.dtype)
+        assert_array_equal(out, expected)
 
     def test_complex_empty_and_singleton(self):
         assert_array_equal(np.arange(5 + 0j, 5 + 0j, 1 + 0j), np.array([], dtype=complex))
