@@ -285,6 +285,60 @@ def average[ScalarT: np.inexact](
     returned: L[True],
     keepdims: L[True],
 ) -> _Tuple2[NDArray[ScalarT]]: ...
+@overload  # timedelta64 array-like, axis=None
+def average(
+    a: _ArrayLike[np.timedelta64],
+    axis: None = None,
+    weights: _ArrayLikeFloat_co | None = None,
+    returned: L[False] = False,
+    *,
+    keepdims: L[False] | _NoValueType = ...,
+) -> np.timedelta64: ...
+@overload  # timedelta64 array-like, axis=<given>
+def average(
+    a: _ArrayLike[np.timedelta64],
+    axis: int | tuple[int, ...],
+    weights: _ArrayLikeFloat_co | None = None,
+    returned: L[False] = False,
+    *,
+    keepdims: L[False] | _NoValueType = ...,
+) -> NDArray[np.timedelta64]: ...
+@overload  # timedelta64 array-like, keepdims=True
+def average(
+    a: _ArrayLike[np.timedelta64],
+    axis: int | tuple[int, ...] | None = None,
+    weights: _ArrayLikeFloat_co | None = None,
+    returned: L[False] = False,
+    *,
+    keepdims: L[True],
+) -> NDArray[np.timedelta64]: ...
+@overload  # timedelta64 array-like, axis=None, returned=True
+def average(
+    a: _ArrayLike[np.timedelta64],
+    axis: None = None,
+    weights: _ArrayLikeFloat_co | None = None,
+    *,
+    returned: L[True],
+    keepdims: L[False] | _NoValueType = ...,
+) -> tuple[np.timedelta64, np.floating]: ...
+@overload  # timedelta64 array-like, axis=<given>, returned=True
+def average(
+    a: _ArrayLike[np.timedelta64],
+    axis: int | tuple[int, ...],
+    weights: _ArrayLikeFloat_co | None = None,
+    *,
+    returned: L[True],
+    keepdims: L[False] | _NoValueType = ...,
+) -> tuple[NDArray[np.timedelta64], NDArray[np.floating]]: ...
+@overload  # timedelta64 array-like, returned=True, keepdims=True
+def average(
+    a: _ArrayLike[np.timedelta64],
+    axis: int | tuple[int, ...] | None = None,
+    weights: _ArrayLikeFloat_co | None = None,
+    *,
+    returned: L[True],
+    keepdims: L[True],
+) -> tuple[NDArray[np.timedelta64], NDArray[np.floating]]: ...
 @overload  # bool or integer array-like, axis=None
 def average(
     a: _SeqND[float] | _ArrayLikeInt_co,

@@ -541,6 +541,84 @@ class TestAverage:
         a = np.array([Fraction(1, 5), Fraction(3, 5)])
         assert_equal(np.average(a), Fraction(2, 5))
 
+    @pytest.mark.parametrize("unit", ["D", "s", "ns"])
+    def test_timedelta64_unweighted(self, unit):
+        # gh-27204: average must work for timedelta64 (mean already does)
+        a = np.array([1, 3, 5], dtype=f"timedelta64[{unit}]")
+        avg = np.average(a)
+        assert_equal(avg, a.mean())
+        assert avg.dtype == a.dtype
+
+        avg, scl = np.average(a, returned=True)
+        assert_equal(avg, a.mean())
+        assert_equal(scl, 3.0)
+        assert isinstance(scl, np.floating)
+
+        a2 = a.reshape(3, 1)
+        avg = np.average(a2, axis=0)
+        assert_array_equal(avg, a2.mean(axis=0))
+        assert avg.dtype == a.dtype
+
+        avg, scl = np.average(a2, axis=0, returned=True, keepdims=True)
+        assert_array_equal(avg, a2.mean(axis=0, keepdims=True))
+        assert_array_equal(scl, np.array([[3.0]]))
+        assert scl.dtype.kind == "f"
+
+    @pytest.mark.parametrize("unit", ["D", "ns"])
+    def test_timedelta64_weighted(self, unit):
+        # gh-27204: weighted average via timedelta * float (preserves NaT)
+        a = np.array([1, 3, 5], dtype=f"timedelta64[{unit}]")
+        w = np.array([1.0, 2.0, 3.0])
+        avg = np.average(a, weights=w)
+        # (1*1 + 3*2 + 5*3) / 6 = 22/6 → truncates like td * float
+        expected = np.multiply(a, w).sum() / w.sum()
+        assert_equal(avg, expected)
+        assert avg.dtype == a.dtype
+
+        avg, scl = np.average(a, weights=w, returned=True)
+        assert_equal(avg, expected)
+        assert_equal(scl, 6.0)
+        assert isinstance(scl, np.floating)
+
+        a2 = np.array([[1, 2], [3, 4]], dtype=f"timedelta64[{unit}]")
+        w0 = np.array([1.0, 3.0])
+        avg = np.average(a2, weights=w0, axis=0)
+        expected = np.multiply(a2, w0[:, None]).sum(axis=0) / w0.sum()
+        assert_array_equal(avg, expected)
+
+        avg, scl = np.average(a2, weights=w0, axis=0, returned=True,
+                              keepdims=True)
+        assert avg.shape == (1, 2)
+        assert_array_equal(scl, np.array([[4.0, 4.0]]))
+
+    def test_timedelta64_nat(self):
+        # NaT must propagate like mean / timedelta multiply
+        a = np.array([1, np.timedelta64("NaT", "D"), 5], dtype="m8[D]")
+        assert np.isnat(np.average(a))
+        w = np.array([1.0, 1.0, 1.0])
+        assert np.isnat(np.average(a, weights=w))
+        # Zero weight on NaT still yields NaT (multiply preserves NaT)
+        w2 = np.array([1.0, 0.0, 1.0])
+        assert np.isnat(np.average(a, weights=w2))
+
+    def test_timedelta64_subclass(self):
+        class Sub(np.ndarray):
+            pass
+
+        a = np.array([1, 3, 5], dtype="m8[D]").view(Sub)
+        assert type(np.average(a)) is Sub
+        w = np.array([1.0, 2.0, 3.0])
+        assert type(np.average(a, weights=w)) is Sub
+        avg, scl = np.average(a, weights=w, returned=True)
+        assert type(avg) is Sub
+        assert isinstance(scl, np.floating)
+
+    def test_datetime64_still_unsupported(self):
+        # mean/average of datetime64 remains unsupported
+        a = np.array(["2000-01-01", "2000-01-03"], dtype="M8[D]")
+        with pytest.raises(TypeError):
+            np.average(a)
+
 
 class TestSelect:
     choices = [np.array([1, 2, 3]),

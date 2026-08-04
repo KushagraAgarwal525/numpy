@@ -13,7 +13,7 @@ AR_b_list: list[npt.NDArray[np.bool]]
 def fn_none_i(a: None, /) -> npt.NDArray[Any]: ...
 def fn_ar_i(a: npt.NDArray[np.float64], posarg: int, /) -> npt.NDArray[Any]: ...
 
-np.average(AR_m)  # type: ignore[type-var]
+np.average(AR_M)  # type: ignore[type-var]
 np.select(1, [AR_f8])  # type: ignore[call-overload]
 np.angle(AR_m)  # type: ignore[type-var]
 np.unwrap(AR_m)  # type: ignore[type-var]
