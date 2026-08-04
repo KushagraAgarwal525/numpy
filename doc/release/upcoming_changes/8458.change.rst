@@ -1,0 +1,6 @@
+``fromfile`` / ``fromstring`` raise on integer overflow
+-------------------------------------------------------
+Reading text integers that do not fit in the requested dtype with
+`numpy.fromfile` or `numpy.fromstring` previously saturated to the dtype
+limits without error (for example ``2**63`` into ``int64``).  Both functions
+now raise ``OverflowError``, matching the safer behaviour of `numpy.loadtxt`.

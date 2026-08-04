@@ -5,6 +5,7 @@
 #include <limits.h>
 #include <float.h>
 #include <assert.h>
+#include <errno.h>
 
 #define NPY_NO_DEPRECATED_API NPY_API_VERSION
 #define _MULTIARRAYMODULE
@@ -1605,6 +1606,21 @@ static void
 
 
 /*
+ * Set OverflowError for out-of-range integer text conversion (fromfile /
+ * fromstring).  May be called without the GIL held.
+ */
+static void
+npy_set_integer_text_overflow_error(void)
+{
+    NPY_ALLOW_C_API_DEF
+    NPY_ALLOW_C_API
+    PyErr_SetString(PyExc_OverflowError,
+            "overflow encountered while converting string to integer");
+    NPY_DISABLE_C_API
+}
+
+
+/*
  * The first ignore argument is for backwards compatibility.
  * Should be removed when the API version is bumped up.
  */
@@ -1621,7 +1637,15 @@ static int
 @fname@_scan(FILE *fp, @type@ *ip, void *NPY_UNUSED(ignore),
         PyArray_Descr *NPY_UNUSED(ignored))
 {
-    return fscanf(fp, "%"@format@, ip);
+    int num;
+
+    errno = 0;
+    num = fscanf(fp, "%"@format@, ip);
+    if (num == 1 && errno == ERANGE) {
+        npy_set_integer_text_overflow_error();
+        return 0;
+    }
+    return num;
 }
 /**end repeat**/
 
@@ -1679,7 +1703,12 @@ static int
     @btype@ temp;
     int num;
 
+    errno = 0;
     num = fscanf(fp, "%"@format@, &temp);
+    if (num == 1 && (errno == ERANGE || temp != (@type@)temp)) {
+        npy_set_integer_text_overflow_error();
+        return 0;
+    }
     *ip = (@type@) temp;
     return num;
 }
@@ -1785,7 +1814,12 @@ static int
 {
     @btype@ result;
 
+    errno = 0;
     result = @func@(str, endptr, 10);
+    if (errno == ERANGE || result != (@type@)result) {
+        npy_set_integer_text_overflow_error();
+        return -1;
+    }
     *(@type@ *)ip = result;
     return 0;
 }

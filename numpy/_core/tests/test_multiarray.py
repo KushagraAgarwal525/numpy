@@ -6491,6 +6491,50 @@ class TestIO:
         d = np.fromstring("1,2", sep=",", dtype=np.int64, count=0)
         assert d.shape == (0,)
 
+    @pytest.mark.parametrize(
+        "dtype,text",
+        [
+            (np.int64, str(2**63)),
+            (np.uint64, str(2**64)),
+            (np.int8, "1000"),
+            (np.uint8, "300"),
+            (np.int16, str(2**16)),
+            (np.int32, str(2**32)),
+        ],
+    )
+    def test_fromstring_integer_overflow(self, dtype, text):
+        # gh-8458: out-of-range integers must not be silently truncated
+        with pytest.raises(OverflowError, match="overflow encountered"):
+            np.fromstring(text, dtype=dtype, sep=" ")
+
+    def test_fromstring_integer_overflow_midstream(self):
+        with pytest.raises(OverflowError, match="overflow encountered"):
+            np.fromstring("1 2 " + str(2**63), dtype=np.int64, sep=" ")
+
+    @pytest.mark.parametrize(
+        "dtype,text",
+        [
+            (np.int64, str(2**63)),
+            (np.uint64, str(2**64)),
+            (np.int8, "1000"),
+        ],
+    )
+    def test_fromfile_integer_overflow(self, tmp_path, param_filename, dtype, text):
+        # gh-8458
+        tmp_filename = normalize_filename(tmp_path, param_filename)
+        with open(tmp_filename, "w") as f:
+            f.write(text)
+        with pytest.raises(OverflowError, match="overflow encountered"):
+            np.fromfile(tmp_filename, dtype=dtype, sep=" ")
+
+    def test_fromfile_integer_overflow_midstream(
+            self, tmp_path, param_filename):
+        tmp_filename = normalize_filename(tmp_path, param_filename)
+        with open(tmp_filename, "w") as f:
+            f.write(f"10 20 {2**63}")
+        with pytest.raises(OverflowError, match="overflow encountered"):
+            np.fromfile(tmp_filename, dtype=np.int64, sep=" ")
+
     def test_empty_files_text(self, tmp_path, param_filename):
         tmp_filename = normalize_filename(tmp_path, param_filename)
         with open(tmp_filename, 'w') as f:
