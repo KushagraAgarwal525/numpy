@@ -479,6 +479,7 @@ NumPyOS_ascii_strtod_plain(const char *s, char** endptr)
 NPY_NO_EXPORT double
 NumPyOS_ascii_strtod(const char *s, char** endptr)
 {
+    const char *original = s;
     const char *p;
     double result;
 
@@ -528,12 +529,22 @@ NumPyOS_ascii_strtod(const char *s, char** endptr)
     }
     /* End of ##1 */
 
-    return NumPyOS_ascii_strtod_plain(s, endptr);
+    result = NumPyOS_ascii_strtod_plain(s, endptr);
+    /*
+     * On failure PyOS_string_to_double returns -1.0 and leaves endptr at the
+     * (already whitespace-stripped) start. Reset to the original start so
+     * callers see that no conversion occurred (gh-18435).
+     */
+    if (endptr != NULL && *endptr == s) {
+        *endptr = (char *)original;
+    }
+    return result;
 }
 
 NPY_NO_EXPORT long double
 NumPyOS_ascii_strtold(const char *s, char** endptr)
 {
+    const char *original = s;
     const char *p;
     long double result;
 #ifdef HAVE_STRTOLD_L
@@ -606,9 +617,16 @@ NumPyOS_ascii_strtold(const char *s, char** endptr)
         }
         result = 0;
     }
+    /*
+     * Mirror NumPyOS_ascii_strtod: if nothing was parsed after skipping
+     * whitespace, report no conversion relative to the original start.
+     */
+    if (endptr != NULL && *endptr == s) {
+        *endptr = (char *)original;
+    }
     return result;
 #else
-    return NumPyOS_ascii_strtod(s, endptr);
+    return NumPyOS_ascii_strtod(original, endptr);
 #endif
 }
 
@@ -690,6 +708,10 @@ read_numberlike_string(FILE *fp, char *buffer, size_t buflen)
     /* 2. consume leading whitespace unconditionally */
     while (NumPyOS_ascii_isspace(c)) {
         c = getc(fp);
+    }
+    /* Whitespace-only input is end-of-file, not a failed parse (gh-18435) */
+    if (c == EOF) {
+        return EOF;
     }
 
     /* 3. start reading matching input to buffer */
