@@ -24,6 +24,55 @@ __all__ = [
 ]
 
 
+def _normalize_grid_slice(start, stop, step):
+    """Normalize slice bounds for ``r_`` / ``mgrid`` / ``ogrid``.
+
+    Returns
+    -------
+    start, stop, step
+        Bounds suitable for ``arange`` / size calculations.  When the original
+        ``stop`` was omitted and ``step`` is negative, ``stop`` is chosen so
+        that 0 is the inclusive endpoint (on-grid values only).
+
+    Open-ended slices (``stop is None``) previously produced nonsense results
+    because ``np.arange(start, None, step)`` reinterprets ``start`` as ``stop``.
+    Per gh-8518, a missing stop is an error unless ``step`` is negative, in
+    which case the sequence ends at 0 inclusive.
+    """
+    if start is None:
+        start = 0
+    if step is None:
+        step = 1
+    if stop is None:
+        if isinstance(step, (_nx.complexfloating, complex)):
+            raise ValueError(
+                "slice stop must be given when using a complex step in "
+                "r_, mgrid, or ogrid"
+            )
+        try:
+            step_is_neg = step < 0
+        except TypeError as e:
+            raise ValueError(
+                "slice stop must be given for r_, mgrid, and ogrid"
+            ) from e
+        if not step_is_neg:
+            raise ValueError(
+                "slice stop must be given for r_, mgrid, and ogrid; "
+                "open-ended slices are not supported (use a negative step "
+                "to count down to 0 inclusive)"
+            )
+        # Count down to 0 inclusive, keeping only on-grid samples.
+        # length = floor(start / (-step)) + 1 for start >= 0.
+        # Exclusive arange stop is then start + length * step.
+        if start < 0:
+            # Already below the inclusive endpoint; empty range.
+            stop = start
+        else:
+            length = int(math.floor(start / (-step))) + 1
+            stop = start + length * step
+    return start, stop, step
+
+
 def _ix__dispatcher(*args):
     return args
 
@@ -118,6 +167,9 @@ class nd_grid:
     number of points to create between the start and stop values, where
     the stop value **is inclusive**.
 
+    A missing slice ``stop`` raises ``ValueError`` unless the step is
+    negative, in which case the sequence ends at 0 inclusive (gh-8518).
+
     If instantiated with an argument of ``sparse=True``, the mesh-grid is
     open (or not fleshed out) so that only one-dimension of each returned
     argument is greater than 1.
@@ -144,68 +196,63 @@ class nd_grid:
         self.sparse = sparse
 
     def __getitem__(self, key):
-        try:
-            size = []
-            # Mimic the behavior of `np.arange` and use a data type
-            # which is at least as large as `np.int_`
-            num_list = [0]
-            for k in range(len(key)):
-                step = key[k].step
-                start = key[k].start
-                stop = key[k].stop
-                if start is None:
-                    start = 0
-                if step is None:
-                    step = 1
-                if isinstance(step, (_nx.complexfloating, complex)):
-                    step = abs(step)
-                    size.append(int(step))
-                else:
-                    size.append(
-                        math.ceil((stop - start) / step))
-                num_list += [start, stop, step]
-            typ = _nx.result_type(*num_list)
-            if self.sparse:
-                nn = [_nx.arange(_x, dtype=_t)
-                      for _x, _t in zip(size, (typ,) * len(size))]
-            else:
-                nn = _nx.indices(size, typ)
-            for k, kk in enumerate(key):
-                step = kk.step
-                start = kk.start
-                if start is None:
-                    start = 0
-                if step is None:
-                    step = 1
-                if isinstance(step, (_nx.complexfloating, complex)):
-                    step = int(abs(step))
-                    if step != 1:
-                        step = (kk.stop - start) / float(step - 1)
-                nn[k] = (nn[k] * step + start)
-            if self.sparse:
-                slobj = [_nx.newaxis] * len(size)
-                for k in range(len(size)):
-                    slobj[k] = slice(None, None)
-                    nn[k] = nn[k][tuple(slobj)]
-                    slobj[k] = _nx.newaxis
-                return tuple(nn)  # ogrid -> tuple of arrays
-            return nn  # mgrid -> ndarray
-        except (IndexError, TypeError):
-            step = key.step
-            stop = key.stop
-            start = key.start
-            if start is None:
-                start = 0
+        # Distinguish a bare slice (1-D result) from an explicit 1-tuple of
+        # slices (keeps a leading length-1 axis for mgrid, as historically).
+        single_slice = False
+        if isinstance(key, slice):
+            key = (key,)
+            single_slice = True
+        elif not isinstance(key, tuple):
+            raise TypeError(
+                "mgrid/ogrid only supports slice indexing, "
+                f"got {type(key).__name__}"
+            )
+
+        size = []
+        # Mimic the behavior of `np.arange` and use a data type
+        # which is at least as large as `np.int_`
+        num_list = [0]
+        normalized = []
+        for kk in key:
+            if not isinstance(kk, slice):
+                raise TypeError(
+                    "mgrid/ogrid only supports slice indexing, "
+                    f"got {type(kk).__name__}"
+                )
+            start, stop, step = _normalize_grid_slice(
+                kk.start, kk.stop, kk.step)
+            normalized.append((start, stop, step))
             if isinstance(step, (_nx.complexfloating, complex)):
-                # Prevent the (potential) creation of integer arrays
-                step_float = abs(step)
-                step = length = int(step_float)
-                if step != 1:
-                    step = (key.stop - start) / float(step - 1)
-                typ = _nx.result_type(start, stop, step_float)
-                return _nx.arange(0, length, 1, dtype=typ) * step + start
+                step_mag = abs(step)
+                size.append(int(step_mag))
+                num_list += [start, stop, step_mag]
             else:
-                return _nx.arange(start, stop, step)
+                size.append(math.ceil((stop - start) / step))
+                num_list += [start, stop, step]
+        typ = _nx.result_type(*num_list)
+        if self.sparse:
+            nn = [_nx.arange(_x, dtype=_t)
+                  for _x, _t in zip(size, (typ,) * len(size))]
+        else:
+            nn = _nx.indices(size, typ)
+        for k, (start, stop, step) in enumerate(normalized):
+            if isinstance(step, (_nx.complexfloating, complex)):
+                step = int(abs(step))
+                if step != 1:
+                    step = (stop - start) / float(step - 1)
+            nn[k] = (nn[k] * step + start)
+        if self.sparse:
+            if single_slice:
+                return nn[0]
+            slobj = [_nx.newaxis] * len(size)
+            for k in range(len(size)):
+                slobj[k] = slice(None, None)
+                nn[k] = nn[k][tuple(slobj)]
+                slobj[k] = _nx.newaxis
+            return tuple(nn)  # ogrid -> tuple of arrays
+        if single_slice:
+            return nn[0]
+        return nn  # mgrid -> ndarray
 
 
 class MGridClass(nd_grid):
@@ -363,13 +410,8 @@ class AxisConcatenator:
         for k, item in enumerate(key):
             scalar = False
             if isinstance(item, slice):
-                step = item.step
-                start = item.start
-                stop = item.stop
-                if start is None:
-                    start = 0
-                if step is None:
-                    step = 1
+                start, stop, step = _normalize_grid_slice(
+                    item.start, item.stop, item.step)
                 if isinstance(step, (_nx.complexfloating, complex)):
                     size = int(abs(step))
                     newobj = linspace(start, stop, num=size)
@@ -468,6 +510,11 @@ class RClass(AxisConcatenator):
     ``np.linspace(start, stop, step, endpoint=1)`` inside of the brackets.
     After expansion of slice notation, all comma separated sequences are
     concatenated together.
+
+    A missing ``stop`` (as in ``r_[3:]``) is not supported and raises
+    ``ValueError``, unless ``step`` is negative, in which case the sequence
+    counts down to 0 inclusive (see gh-8518). A missing ``start`` defaults
+    to 0.
 
     Optional character strings placed as the first element of the index
     expression can be used to change the output. The strings 'r' or 'c' result
