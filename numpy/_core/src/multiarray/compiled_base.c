@@ -15,11 +15,70 @@
 #include "alloc.h"
 #include "ctors.h"
 #include "common.h"
+#include "convert_datatype.h"
 #include "dtypemeta.h"
 #include "dtype_transfer.h"
 #include "simd/simd.h"
 
 #include <string.h>
+
+/*
+ * Convert `op` to a contiguous array of `typenum` for np.interp.
+ *
+ * Unlike PyArray_ContiguousFromAny with a requested floating dtype, this
+ * discovers the natural dtype first so that Python strings/bytes (and
+ * sequences of them) are not silently parsed as floats (gh-15008).
+ * String-like inputs raise TypeError.  Dtypes that are not safely castable
+ * to `typenum` (object, datetime, …) still use ContiguousFromAny so
+ * historical behaviour for those inputs is preserved.
+ */
+static PyArrayObject *
+interp_contiguous_from_any(PyObject *op, int typenum,
+                           int min_depth, int max_depth)
+{
+    PyArrayObject *tmp;
+    PyArrayObject *ret;
+    PyArray_Descr *descr;
+    int type_num;
+
+    tmp = (PyArrayObject *)PyArray_FromAny(op, NULL, min_depth, max_depth,
+                                           NPY_ARRAY_DEFAULT, NULL);
+    if (tmp == NULL) {
+        return NULL;
+    }
+
+    type_num = PyArray_TYPE(tmp);
+    if (PyTypeNum_ISSTRING(type_num) || type_num == NPY_VSTRING) {
+        descr = PyArray_DescrFromType(typenum);
+        if (descr == NULL) {
+            Py_DECREF(tmp);
+            return NULL;
+        }
+        npy_set_invalid_cast_error(
+                PyArray_DESCR(tmp), descr, NPY_SAFE_CASTING,
+                PyArray_NDIM(tmp) == 0);
+        Py_DECREF(descr);
+        Py_DECREF(tmp);
+        return NULL;
+    }
+
+    descr = PyArray_DescrFromType(typenum);
+    if (descr == NULL) {
+        Py_DECREF(tmp);
+        return NULL;
+    }
+
+    if (PyArray_CanCastArrayTo(tmp, descr, NPY_SAFE_CASTING)) {
+        ret = (PyArrayObject *)PyArray_FromArray(tmp, descr, NPY_ARRAY_DEFAULT);
+        Py_DECREF(tmp);
+        return ret;
+    }
+    Py_DECREF(descr);
+    Py_DECREF(tmp);
+
+    return (PyArrayObject *)PyArray_ContiguousFromAny(
+            op, typenum, min_depth, max_depth);
+}
 
 typedef enum {
     PACK_ORDER_LITTLE = 0,
@@ -601,15 +660,15 @@ arr_interp(PyObject *NPY_UNUSED(self), PyObject *const *args, Py_ssize_t len_arg
         return NULL;
     }
 
-    afp = (PyArrayObject *)PyArray_ContiguousFromAny(fp, NPY_DOUBLE, 1, 1);
+    afp = interp_contiguous_from_any(fp, NPY_DOUBLE, 1, 1);
     if (afp == NULL) {
         return NULL;
     }
-    axp = (PyArrayObject *)PyArray_ContiguousFromAny(xp, NPY_DOUBLE, 1, 1);
+    axp = interp_contiguous_from_any(xp, NPY_DOUBLE, 1, 1);
     if (axp == NULL) {
         goto fail;
     }
-    ax = (PyArrayObject *)PyArray_ContiguousFromAny(x, NPY_DOUBLE, 0, 0);
+    ax = interp_contiguous_from_any(x, NPY_DOUBLE, 0, 0);
     if (ax == NULL) {
         goto fail;
     }
@@ -777,17 +836,17 @@ arr_interp_complex(PyObject *NPY_UNUSED(self), PyObject *const *args, Py_ssize_t
         return NULL;
     }
 
-    afp = (PyArrayObject *)PyArray_ContiguousFromAny(fp, NPY_CDOUBLE, 1, 1);
+    afp = interp_contiguous_from_any(fp, NPY_CDOUBLE, 1, 1);
 
     if (afp == NULL) {
         return NULL;
     }
 
-    axp = (PyArrayObject *)PyArray_ContiguousFromAny(xp, NPY_DOUBLE, 1, 1);
+    axp = interp_contiguous_from_any(xp, NPY_DOUBLE, 1, 1);
     if (axp == NULL) {
         goto fail;
     }
-    ax = (PyArrayObject *)PyArray_ContiguousFromAny(x, NPY_DOUBLE, 0, 0);
+    ax = interp_contiguous_from_any(x, NPY_DOUBLE, 0, 0);
     if (ax == NULL) {
         goto fail;
     }

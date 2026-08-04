@@ -1547,6 +1547,17 @@ def _interp_dispatcher(x, xp, fp, left=None, right=None, period=None):
     return (x, xp, fp)
 
 
+def _interp_reject_stringlike(a, name, input_dtype):
+    """Raise TypeError if `a` is string/bytes-like (gh-15008)."""
+    a = np.asanyarray(a)
+    if a.dtype.kind in 'SUT':
+        raise TypeError(
+            f"Cannot cast {name} from dtype({a.dtype!r}) to "
+            f"dtype({np.dtype(input_dtype)!r}) according to the rule 'safe'"
+        )
+    return a
+
+
 @array_function_dispatch(_interp_dispatcher)
 def interp(x, xp, fp, left=None, right=None, period=None):
     """
@@ -1590,6 +1601,9 @@ def interp(x, xp, fp, left=None, right=None, period=None):
         If `xp` and `fp` have different length
         If `xp` or `fp` are not 1-D sequences
         If `period == 0`
+    TypeError
+        If `x`, `xp`, or `fp` contain string or bytes data that would
+        otherwise be silently converted to floating-point values
 
     See Also
     --------
@@ -1667,6 +1681,9 @@ def interp(x, xp, fp, left=None, right=None, period=None):
         left = None
         right = None
 
+        x = _interp_reject_stringlike(x, "x", np.float64)
+        xp = _interp_reject_stringlike(xp, "xp", np.float64)
+        fp = _interp_reject_stringlike(fp, "fp", input_dtype)
         x = np.asarray(x, dtype=np.float64)
         xp = np.asarray(xp, dtype=np.float64)
         fp = np.asarray(fp, dtype=input_dtype)
