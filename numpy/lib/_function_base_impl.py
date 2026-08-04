@@ -657,12 +657,12 @@ def average(a, axis=None, weights=None, returned=False, *,
         nonzero_wgt = (wgt != 0)
         if where_is_default:
             mul_where = nonzero_wgt
-            sum_where = True
+            sum_where_kw = {}
         else:
             mul_where = np.logical_and(where, nonzero_wgt)
-            sum_where = where
+            sum_where_kw = {'where': where}
 
-        scl = wgt.sum(axis=axis, dtype=result_dtype, where=sum_where,
+        scl = wgt.sum(axis=axis, dtype=result_dtype, **sum_where_kw,
                       **keepdims_kw)
         if np.any(scl == 0.0):
             raise ZeroDivisionError(
@@ -670,13 +670,19 @@ def average(a, axis=None, weights=None, returned=False, *,
 
         # Accumulate a*wgt only where the contribution is included; elsewhere
         # leave zeros so 0*inf / 0*nan never materializes.
-        prod = np.zeros(np.broadcast_shapes(a.shape, wgt.shape),
-                        dtype=result_dtype)
-        if type(a) is not np.ndarray:
-            # Preserve ndarray subclasses (see test_subclasses).
-            prod = prod.view(type(a))
-        np.multiply(a, wgt, out=prod, where=mul_where)
-        avg = avg_as_array = prod.sum(axis, **keepdims_kw) / scl
+        # Fast path when every weight is nonzero and where is default: matches
+        # the historical multiply+sum and preserves np.matrix subclasses.
+        if where_is_default and np.all(nonzero_wgt):
+            avg = avg_as_array = np.multiply(
+                a, wgt, dtype=result_dtype).sum(axis, **keepdims_kw) / scl
+        else:
+            prod = np.zeros(np.broadcast_shapes(a.shape, wgt.shape),
+                            dtype=result_dtype)
+            if type(a) is not np.ndarray:
+                # Preserve ndarray subclasses (see test_subclasses).
+                prod = prod.view(type(a))
+            np.multiply(a, wgt, out=prod, where=mul_where)
+            avg = avg_as_array = prod.sum(axis, **keepdims_kw) / scl
 
     if returned:
         if scl.shape != avg_as_array.shape:
