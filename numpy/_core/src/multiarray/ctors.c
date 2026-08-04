@@ -96,6 +96,20 @@ fromstr_next_element(char **s, void *dptr, PyArray_Descr *dtype,
         if (string_is_fully_read(*s, end)) {
             return -1;
         }
+        /*
+         * Whitespace-only remainder is treated as end-of-input so that
+         * fromstring("\n", sep=" ") returns an empty array rather than a
+         * spurious value (gh-18435).
+         */
+        {
+            char *p = *s;
+            while (!string_is_fully_read(p, end) && isspace((unsigned char)*p)) {
+                p++;
+            }
+            if (string_is_fully_read(p, end)) {
+                return -1;
+            }
+        }
         return -2;
     }
     *s = e;

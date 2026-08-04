@@ -6491,6 +6491,35 @@ class TestIO:
         d = np.fromstring("1,2", sep=",", dtype=np.int64, count=0)
         assert d.shape == (0,)
 
+    @pytest.mark.parametrize("dtype", [np.float64, np.int64, np.float32, np.int32])
+    @pytest.mark.parametrize("s", ["\n", " ", "  ", "\t", "\n\n", " \t\n "])
+    def test_fromstring_whitespace_only(self, dtype, s):
+        # gh-18435: whitespace-only input must not invent a -1./0 element
+        assert_array_equal(np.fromstring(s, sep=" ", dtype=dtype),
+                           np.array([], dtype=dtype))
+
+    def test_fromstring_whitespace_only_comma_sep(self):
+        # Pure whitespace with a non-whitespace separator is still "no values"
+        assert_array_equal(np.fromstring("\n", sep=",", dtype=float),
+                           np.array([], dtype=float))
+        assert_array_equal(np.fromstring("  ", sep=",", dtype=int),
+                           np.array([], dtype=int))
+
+    def test_fromstring_whitespace_before_values(self):
+        assert_array_equal(np.fromstring("\n1 2", sep=" ", dtype=float),
+                           np.array([1., 2.]))
+        assert_array_equal(np.fromstring("  -3\t4\n", sep=" ", dtype=int),
+                           np.array([-3, 4]))
+
+    def test_fromfile_whitespace_only(self, tmp_path):
+        # Match fromstring: whitespace-only text files yield an empty array
+        path = tmp_path / "ws.txt"
+        path.write_text("\n  \t\n")
+        assert_array_equal(np.fromfile(path, sep=" ", dtype=float),
+                           np.array([], dtype=float))
+        assert_array_equal(np.fromfile(path, sep=",", dtype=int),
+                           np.array([], dtype=int))
+
     def test_empty_files_text(self, tmp_path, param_filename):
         tmp_filename = normalize_filename(tmp_path, param_filename)
         with open(tmp_filename, 'w') as f:

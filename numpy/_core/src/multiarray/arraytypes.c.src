@@ -1783,9 +1783,27 @@ static int
 @fname@_fromstr(char *str, void *ip, char **endptr,
         PyArray_Descr *NPY_UNUSED(ignore))
 {
+    char *p;
     @btype@ result;
 
     result = @func@(str, endptr, 10);
+    /*
+     * strto* skips leading whitespace. If nothing else was converted, reset
+     * endptr to the start so callers do not treat whitespace as a successful
+     * read (which previously produced a spurious 0 in fromstring, gh-18435).
+     */
+    if (endptr != NULL) {
+        p = str;
+        while (NumPyOS_ascii_isspace((unsigned char)*p)) {
+            p++;
+        }
+        if (*p == '+' || *p == '-') {
+            p++;
+        }
+        if (!NumPyOS_ascii_isdigit(*p)) {
+            *endptr = str;
+        }
+    }
     *(@type@ *)ip = result;
     return 0;
 }
