@@ -4696,6 +4696,69 @@ class TestAttributes:
         assert_(ncu.frexp.__doc__.startswith(
             "frexp(x[, out1, out2], / [, out=(None, None)], *, where=True"))
 
+    def test_types_are_unique(self):
+        # gh-28365: SIMD dispatch used to register the same signature twice
+        # (legacy scalar loop + dispatched loop), so ufunc.types had duplicates.
+        from collections import Counter
+
+        duplicated = {}
+        for name in dir(np):
+            ufunc = getattr(np, name)
+            if not isinstance(ufunc, np.ufunc):
+                continue
+            counts = Counter(ufunc.types)
+            dups = sorted(sig for sig, n in counts.items() if n > 1)
+            if dups:
+                duplicated[name] = dups
+        assert duplicated == {}, (
+            "ufunc.types must not contain duplicate signatures; "
+            f"found duplicates in: {duplicated}"
+        )
+
+    @pytest.mark.parametrize(
+        "ufunc, dtype",
+        [
+            (np.sqrt, np.float16),
+            (np.sqrt, np.float32),
+            (np.sqrt, np.float64),
+            (np.sqrt, np.longdouble),
+            (np.exp, np.float32),
+            (np.exp, np.float64),
+            (np.log, np.float32),
+            (np.log, np.float64),
+            (np.ceil, np.float32),
+            (np.ceil, np.float64),
+            (np.floor, np.float32),
+            (np.power, np.float32),
+            (np.power, np.float64),
+            (np.arccos, np.float32),
+            (np.arccos, np.float64),
+            (np.tanh, np.float32),
+            (np.tanh, np.float64),
+            (np.cbrt, np.float32),
+            (np.sin, np.float32),
+            (np.sin, np.float64),
+        ],
+    )
+    def test_dispatched_loops_still_resolve(self, ufunc, dtype):
+        # Removing duplicate legacy scalar registrations must not drop the
+        # dtype from type resolution (SIMD/baseline dispatch still covers it).
+        x = np.array([0.25, 1.0, 4.0], dtype=dtype)
+        if ufunc is np.arccos:
+            x = np.array([0.0, 0.5, 1.0], dtype=dtype)
+        elif ufunc is np.tanh:
+            x = np.array([-0.5, 0.0, 0.5], dtype=dtype)
+        elif ufunc is np.power:
+            y = np.array([2.0, 2.0, 0.5], dtype=dtype)
+            out = ufunc(x, y)
+            assert out.dtype == dtype
+            assert_array_equal(out, x ** y)
+            return
+        out = ufunc(x)
+        assert out.dtype == dtype
+        # Spot-check a finite result exists (exact values covered elsewhere)
+        assert np.isfinite(out).any()
+
 
 class TestSubclass:
 
