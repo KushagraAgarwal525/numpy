@@ -501,12 +501,37 @@ class TestPCG64DXSM(Base):
         rs = Generator(self.bit_generator(38219308213743))
         pcg = rs.bit_generator
         state = pcg.state
-        initial_state = 287608843259529770491897792873167516365
+        initial_state = 63870274294179594843067207569095040205
         assert state["state"]["state"] == initial_state
         pcg.advance(sum(2**i for i in (96, 64, 32, 16, 8, 4, 2, 1)))
         state = pcg.state["state"]
-        advanced_state = 277778083536782149546677086420637664879
+        advanced_state = 148678425949236944617784681164250677359
         assert state["state"] == advanced_state
+
+    def test_seed_uses_cheap_multiplier(self):
+        # gh-22472: seeding must use pcg_cm_srandom_r (cheap 64-bit LCG
+        # multiplier), not the default 128-bit PCG64 srandom path.
+        # Same SeedSequence entropy must therefore yield a different LCG
+        # state than PCG64, while matching an independent CM DXSM reference.
+        seed = 0xdeadbeaf
+        dxsm = self.bit_generator(seed)
+        pcg64 = PCG64(seed)
+        assert dxsm.state["state"]["inc"] == pcg64.state["state"]["inc"]
+        assert dxsm.state["state"]["state"] != pcg64.state["state"]["state"]
+
+        ss = SeedSequence(seed)
+        val = ss.generate_state(4, np.uint64)
+        initstate = (int(val[0]) << 64) | int(val[1])
+        initseq = (int(val[2]) << 64) | int(val[3])
+        cheap = 0xda942042e4dd58b5
+        mask = (1 << 128) - 1
+        state = 0
+        inc = ((initseq << 1) | 1) & mask
+        state = ((state * cheap) + inc) & mask
+        state = (state + initstate) & mask
+        state = ((state * cheap) + inc) & mask
+        assert dxsm.state["state"]["state"] == state
+        assert dxsm.state["state"]["inc"] == inc
 
 
 class TestMT19937(Base):

@@ -159,6 +159,22 @@ extern void pcg64_set_seed(pcg64_state *state, uint64_t *seed, uint64_t *inc) {
   pcg64_srandom_r(state->pcg_state, s, i);
 }
 
+extern void pcg64dxsm_set_seed(pcg64_state *state, uint64_t *seed,
+                               uint64_t *inc) {
+  pcg128_t s, i;
+#ifndef PCG_EMULATED_128BIT_MATH
+  s = (((pcg128_t)seed[0]) << 64) | seed[1];
+  i = (((pcg128_t)inc[0]) << 64) | inc[1];
+#else
+  s.high = seed[0];
+  s.low = seed[1];
+  i.high = inc[0];
+  i.low = inc[1];
+#endif
+  /* DXSM uses the 64-bit cheap multiplier in the LCG, including seeding. */
+  pcg_cm_srandom_r(state->pcg_state, s, i);
+}
+
 extern void pcg64_get_state(pcg64_state *state, uint64_t *state_arr,
                             int *has_uint32, uint32_t *uinteger) {
   /*

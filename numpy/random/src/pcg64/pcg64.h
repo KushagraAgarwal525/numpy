@@ -415,6 +415,7 @@ void pcg64_advance(pcg64_state *state, uint64_t *step);
 void pcg64_cm_advance(pcg64_state *state, uint64_t *step);
 
 void pcg64_set_seed(pcg64_state *state, uint64_t *seed, uint64_t *inc);
+void pcg64dxsm_set_seed(pcg64_state *state, uint64_t *seed, uint64_t *inc);
 
 void pcg64_get_state(pcg64_state *state, uint64_t *state_arr, int *has_uint32,
                      uint32_t *uinteger);
