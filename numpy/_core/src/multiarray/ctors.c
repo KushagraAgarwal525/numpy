@@ -3087,6 +3087,32 @@ _arange_safe_ceil_to_intp(double value)
 }
 
 
+/*
+ * Return 1 if obj represents an integral value, 0 if not, -1 on error.
+ * Used by arange to detect when integer-dtype fill would truncate the step.
+ */
+static int
+_arange_pyobj_is_integral(PyObject *obj)
+{
+    double val;
+
+    if (PyBool_Check(obj) || PyLong_Check(obj) ||
+            PyArray_IsScalar(obj, Integer)) {
+        return 1;
+    }
+
+    val = PyFloat_AsDouble(obj);
+    if (val == -1.0 && PyErr_Occurred()) {
+        return -1;
+    }
+    if (npy_isnan(val) || npy_isinf(val)) {
+        /* Non-finite: prefer the floating path / length error handling. */
+        return 0;
+    }
+    return npy_floor(val) == val;
+}
+
+
 /*NUMPY_API
   Arange,
 */
@@ -3100,6 +3126,31 @@ PyArray_Arange(double start, double stop, double step, int type_num)
     int ret;
     double delta, tmp_len;
     NPY_BEGIN_THREADS_DEF;
+
+    /*
+     * Integer dtypes truncate start/step via setitem, then fill uses the
+     * truncated integer spacing. That silently yields wrong results when the
+     * true spacing is non-integral (e.g. arange(0, 5, 0.5, dtype=int) used to
+     * return all zeros). Generate in float64 then cast instead.  See gh-13349.
+     */
+    if (PyTypeNum_ISINTEGER(type_num) &&
+            (npy_floor(start) != start || npy_floor(step) != step)) {
+        PyObject *tmp, *ret_arr;
+        PyArray_Descr *descr;
+
+        tmp = PyArray_Arange(start, stop, step, NPY_DOUBLE);
+        if (tmp == NULL) {
+            return NULL;
+        }
+        descr = PyArray_DescrFromType(type_num);
+        if (descr == NULL) {
+            Py_DECREF(tmp);
+            return NULL;
+        }
+        ret_arr = PyArray_CastToType((PyArrayObject *)tmp, descr, 0);
+        Py_DECREF(tmp);
+        return ret_arr;
+    }
 
     delta = stop - start;
     tmp_len = delta/step;
@@ -3371,6 +3422,44 @@ PyArray_ArangeObj(PyObject *start, PyObject *stop, PyObject *step, PyArray_Descr
         start = PyLong_FromLong(0);
         if (start == NULL) {
             goto fail;
+        }
+    }
+
+    /*
+     * gh-13349: Integer dtype fill uses truncated start/next values, so a
+     * non-integral step (e.g. 0.5) becomes 0 and yields wrong results.
+     * Build the sequence with the inferred floating dtype, then cast.
+     */
+    if (PyTypeNum_ISINTEGER(native->type_num)) {
+        int start_integral = _arange_pyobj_is_integral(start);
+        int step_integral = _arange_pyobj_is_integral(step);
+        if (start_integral < 0 || step_integral < 0) {
+            goto fail;
+        }
+        if (!start_integral || !step_integral) {
+            PyArray_Descr *out_descr;
+            PyObject *tmp, *ret_arr;
+
+            out_descr = dtype;
+            Py_INCREF(out_descr);
+
+            /* Recurse with dtype=NULL so start/stop/step promote to float. */
+            Py_DECREF(dtype);
+            Py_DECREF(native);
+            dtype = NULL;
+            native = NULL;
+            tmp = PyArray_ArangeObj(start, stop, step, NULL);
+            Py_DECREF(start);
+            Py_DECREF(stop);
+            Py_DECREF(step);
+            start = stop = step = NULL;
+            if (tmp == NULL) {
+                Py_DECREF(out_descr);
+                return NULL;
+            }
+            ret_arr = PyArray_CastToType((PyArrayObject *)tmp, out_descr, 0);
+            Py_DECREF(tmp);
+            return ret_arr;
         }
     }
 

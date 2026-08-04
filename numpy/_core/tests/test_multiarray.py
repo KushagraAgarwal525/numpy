@@ -10956,6 +10956,59 @@ class TestArange:
         with pytest.raises(TypeError):
             np.arange(3, dtype="bool")
 
+    @pytest.mark.parametrize("dtype", [np.int8, np.int16, np.int32, np.int64,
+                                       np.uint8, np.uint16, np.uint32, np.uint64])
+    def test_integer_dtype_nonintegral_step(self, dtype):
+        # gh-13349: float step with integer dtype must not truncate the step
+        # to zero (or otherwise use integer fill spacing).
+        res = np.arange(0, 5, 0.5, dtype=dtype)
+        expected = np.arange(0, 5, 0.5).astype(dtype)
+        assert_array_equal(res, expected)
+        assert res.dtype == np.dtype(dtype)
+
+        res = np.arange(0.5, 5, 0.5, dtype=dtype)
+        expected = np.arange(0.5, 5, 0.5).astype(dtype)
+        assert_array_equal(res, expected)
+
+        res = np.arange(0, 5, 1.5, dtype=dtype)
+        expected = np.arange(0, 5, 1.5).astype(dtype)
+        assert_array_equal(res, expected)
+
+    @pytest.mark.parametrize("dtype", [np.int8, np.int16, np.int32, np.int64])
+    def test_integer_dtype_nonintegral_step_negative(self, dtype):
+        # Signed integer path covering negative starts (gh-13349).
+        res = np.arange(-5, 0, 0.5, dtype=dtype)
+        expected = np.arange(-5, 0, 0.5).astype(dtype)
+        assert_array_equal(res, expected)
+
+    def test_integer_dtype_integral_float_step_unchanged(self):
+        # Integral float start/step should keep the fast integer fill path.
+        res = np.arange(0.0, 5.0, 1.0, dtype=np.int64)
+        assert_array_equal(res, np.arange(0, 5, dtype=np.int64))
+        assert res.dtype == np.int64
+
+        res = np.arange(np.float64(2), np.float64(10), np.float64(2),
+                        dtype=np.int32)
+        assert_array_equal(res, [2, 4, 6, 8])
+        assert res.dtype == np.int32
+
+    def test_integer_dtype_nonintegral_start(self):
+        # Non-integral start with integral step also needs the float path.
+        res = np.arange(0.5, 5, 1, dtype=np.int64)
+        expected = np.arange(0.5, 5, 1).astype(np.int64)
+        assert_array_equal(res, expected)
+
+    def test_integer_dtype_byteswapped_nonintegral_step(self):
+        res = np.arange(0, 5, 0.5, dtype=">i4")
+        expected = np.arange(0, 5, 0.5).astype(">i4")
+        assert_array_equal(res, expected)
+        assert res.dtype == np.dtype(">i4")
+
+        res = np.arange(0, 5, 0.5, dtype="<i4")
+        expected = np.arange(0, 5, 0.5).astype("<i4")
+        assert_array_equal(res, expected)
+        assert res.dtype == np.dtype("<i4")
+
     @pytest.mark.parametrize("dtype", ["S3", "U", "5i"])
     def test_rejects_bad_dtypes(self, dtype):
         dtype = np.dtype(dtype)
