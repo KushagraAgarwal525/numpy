@@ -271,6 +271,34 @@ class TestGrid:
         assert_equal(grid.size, expected[0])
         assert_equal(grid_small.size, expected[1])
 
+    def test_stop_less_slice_errors(self):
+        # gh-8518: open-ended slices must not silently reinterpret start
+        for grid in (mgrid, ogrid):
+            with assert_raises(ValueError):
+                grid[3:]
+            with assert_raises(ValueError):
+                grid[3::2]
+            with assert_raises(ValueError):
+                grid[3:, :5]
+            with assert_raises(ValueError):
+                grid[:5, 3:]
+            with assert_raises(ValueError):
+                grid[3::5j]
+
+    def test_stop_less_negative_step(self):
+        # Negative step with missing stop counts down to 0 inclusive.
+        assert_array_equal(mgrid[5::-1], [5, 4, 3, 2, 1, 0])
+        assert_array_equal(ogrid[5::-1], [5, 4, 3, 2, 1, 0])
+        assert_array_equal(mgrid[6::-2], [6, 4, 2, 0])
+        # Multi-dimensional: first axis open-ended with negative step
+        g = mgrid[3::-1, 0:2]
+        assert_equal(g.shape, (2, 4, 2))
+        assert_array_equal(g[0, :, 0], [3, 2, 1, 0])
+        assert_array_equal(g[1, 0, :], [0, 1])
+        o0, o1 = ogrid[3::-1, 0:2]
+        assert_array_equal(o0.ravel(), [3, 2, 1, 0])
+        assert_array_equal(o1.ravel(), [0, 1])
+
     def test_accepts_npfloating(self):
         # regression test for #16466
         grid64 = mgrid[0.1:0.33:0.1, ]
@@ -280,10 +308,12 @@ class TestGrid:
         assert grid32.dtype == np.float32
         assert grid64.dtype == np.float64
 
-        # different code path for single slice
+        # Single slice shares the same dtype promotion path as the
+        # trailing-comma form (unified after gh-8518).
         grid64 = mgrid[0.1:0.33:0.1]
         grid32 = mgrid[np.float32(0.1):np.float32(0.33):np.float32(0.1)]
-        assert_(grid32.dtype == np.float64)
+        assert grid32.dtype == np.float32
+        assert grid64.dtype == np.float64
         assert_array_almost_equal(grid64, grid32)
 
     def test_accepts_longdouble(self):
@@ -371,6 +401,34 @@ class TestConcatenator:
         assert_equal(r_[0, np.array(1), 2], [0, 1, 2])
         assert_equal(r_[[0, 1, 2], np.array(3)], [0, 1, 2, 3])
         assert_equal(r_[np.array(0), [1, 2, 3]], [0, 1, 2, 3])
+
+    def test_stop_less_slice_errors(self):
+        # gh-8518: open-ended slices previously produced nonsense
+        # (r_[3:] == [0, 1, 2]) via arange(start, None) reinterpretation.
+        with assert_raises(ValueError):
+            r_[3:]
+        with assert_raises(ValueError):
+            r_[3::]
+        with assert_raises(ValueError):
+            r_[3::2]
+        with assert_raises(ValueError):
+            r_[:3, 5:]
+        with assert_raises(ValueError):
+            r_[3::5j]  # complex step still requires an explicit stop
+        with assert_raises(ValueError):
+            r_[::5j]
+
+    def test_stop_less_negative_step(self):
+        # Negative step with missing stop counts down to 0 inclusive.
+        assert_array_equal(r_[5::-1], [5, 4, 3, 2, 1, 0])
+        assert_array_equal(r_[6::-2], [6, 4, 2, 0])
+        assert_array_equal(r_[5::-2], [5, 3, 1])
+        assert_array_equal(r_[::-1], [0])
+        # Explicit stop is unchanged (exclusive as usual)
+        assert_array_equal(r_[5:0:-1], [5, 4, 3, 2, 1])
+        # Still works when mixed with other operands
+        assert_array_equal(r_[5::-1, 10, 11], [5, 4, 3, 2, 1, 0, 10, 11])
+        assert_array_equal(r_[3:6, 5::-1], [3, 4, 5, 5, 4, 3, 2, 1, 0])
 
 
 class TestNdenumerate:
