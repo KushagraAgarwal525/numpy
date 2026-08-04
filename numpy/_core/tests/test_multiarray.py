@@ -9505,13 +9505,21 @@ class TestNewBufferProtocol:
             pytest.param(rational2(1, 2), TypeError,
                          id="scalar_new_api")])
     def test_export_and_pickle_user_dtype(self, obj, error):
-        # User dtypes should export successfully when FORMAT was not requested.
+        # FORMAT always fails for these user dtypes.
         with pytest.raises(error):
             _multiarray_tests.get_buffer_info(obj, ("STRIDED_RO", "FORMAT"))
 
-        _multiarray_tests.get_buffer_info(obj, ("STRIDED_RO",))
+        # Exporting without FORMAT used to succeed; that path is now
+        # deprecated for arrays (gh-29226). Scalars may use a different
+        # buffer implementation that does not go through array_getbuffer.
+        if isinstance(obj, np.ndarray):
+            with pytest.warns(DeprecationWarning,
+                              match="Exporting a buffer without a format"):
+                _multiarray_tests.get_buffer_info(obj, ("STRIDED_RO",))
+        else:
+            _multiarray_tests.get_buffer_info(obj, ("STRIDED_RO",))
 
-        # This is currently also necessary to implement pickling:
+        # Pickling must still work (it does not rely on the no-format buffer).
         pickle_obj = pickle.dumps(obj)
         res = pickle.loads(pickle_obj)
         assert_array_equal(res, obj)
