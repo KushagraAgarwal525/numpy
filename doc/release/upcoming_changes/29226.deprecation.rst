@@ -1,0 +1,11 @@
+Buffer export without format for unformattable reference dtypes
+---------------------------------------------------------------
+
+Requesting a buffer without ``PyBUF_FORMAT`` for reference dtypes that cannot
+provide a PEP 3118 format string (notably `numpy.dtypes.StringDType`) is
+deprecated. Callers such as ``hashlib`` previously bypassed the format check
+and could hash StringDType metadata pointers rather than string contents,
+leading to collisions for arena-backed strings. Such exports will raise an
+error in a future NumPy version. Prefer converting to a fixed-width string
+dtype or hashing string contents explicitly. Datetime/timedelta no-format
+exports remain allowed because their data buffers hold the payload ticks.

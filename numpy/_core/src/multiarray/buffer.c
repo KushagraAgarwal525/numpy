@@ -749,6 +749,63 @@ _buffer_get_info(void **buffer_info_cache_ptr, PyObject *obj, int flags)
 
 
 /*
+ * Warn when exporting a buffer without PyBUF_FORMAT for a reference dtype
+ * that cannot provide a PEP 3118 format string. Callers such as hashlib
+ * request buffers without a format and previously bypassed the format check,
+ * allowing unsafe exports for StringDType (gh-29226): the array data buffer
+ * holds metadata pointers, not string bytes, so hashes can collide.
+ *
+ * Limited to reference dtypes (PyDataType_REFCHK). Datetime/timedelta and
+ * structured dtypes with holes also fail format construction, but their
+ * data buffers still contain the payload bytes and remain useful for
+ * no-format consumers (e.g. ndarray(..., buffer=arr)).
+ *
+ * Returns 0 on success (including after emitting a warning), -1 on error.
+ */
+static int
+_buffer_warn_if_unformattable(PyObject *obj, PyArray_Descr *descr)
+{
+    _tmp_string_t fmt = {NULL, 0, 0};
+    int err;
+
+    if (!PyDataType_REFCHK(descr)) {
+        return 0;
+    }
+
+    err = _buffer_format_string(descr, &fmt, obj, NULL, NULL);
+    if (err == 0) {
+        PyMem_Free(fmt.s);
+        return 0;
+    }
+    /* Propagate allocation failures; only deprecate format rejection. */
+    if (PyErr_ExceptionMatches(PyExc_MemoryError)) {
+        PyMem_Free(fmt.s);
+        return -1;
+    }
+    PyErr_Clear();
+    PyMem_Free(fmt.s);
+
+    /* Deprecated NumPy 2.6, 2026-08-04 */
+    if (PyDataType_ISLEGACY(descr)) {
+        return PyErr_WarnFormat(
+                PyExc_DeprecationWarning, 1,
+                "Exporting a buffer without a format string for dtype '%c' "
+                "has been deprecated in NumPy 2.6. This dtype cannot be "
+                "represented as a buffer; such exports will raise an error "
+                "in a future NumPy version.",
+                descr->type);
+    }
+    return PyErr_WarnFormat(
+            PyExc_DeprecationWarning, 1,
+            "Exporting a buffer without a format string for dtype '%s' "
+            "has been deprecated in NumPy 2.6. This dtype cannot be "
+            "represented as a buffer; such exports will raise an error "
+            "in a future NumPy version.",
+            ((PyTypeObject *)NPY_DTYPE(descr))->tp_name);
+}
+
+
+/*
  * Retrieving buffers for ndarray
  */
 static int
@@ -783,6 +840,16 @@ array_getbuffer(PyObject *obj, Py_buffer *view, int flags)
     }
     if ((flags & PyBUF_WRITEABLE) == PyBUF_WRITEABLE) {
         if (PyArray_FailUnlessWriteable(self, "buffer source array") < 0) {
+            goto fail;
+        }
+    }
+
+    /*
+     * When format is not requested, still reject (via deprecation) dtypes
+     * that cannot build a format string. See gh-29226.
+     */
+    if ((flags & PyBUF_FORMAT) != PyBUF_FORMAT) {
+        if (_buffer_warn_if_unformattable(obj, PyArray_DESCR(self)) < 0) {
             goto fail;
         }
     }
@@ -872,7 +939,15 @@ void_getbuffer(PyObject *self, Py_buffer *view, int flags)
     view->buf = scalar->obval;
 
     if (((flags & PyBUF_FORMAT) != PyBUF_FORMAT)) {
-        /* It is unnecessary to find the correct format */
+        /*
+         * Format is not required by the consumer, but still deprecate when
+         * this dtype could not provide one (gh-29226).
+         */
+        if (_buffer_warn_if_unformattable(self, (PyArray_Descr *)scalar->descr) < 0) {
+            Py_DECREF(self);
+            view->obj = NULL;
+            return -1;
+        }
         view->format = NULL;
         return 0;
     }

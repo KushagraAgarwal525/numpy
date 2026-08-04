@@ -9359,6 +9359,52 @@ class TestNewBufferProtocol:
         assert_raises((ValueError, BufferError), memoryview, a)
         assert_raises((ValueError, BufferError), memoryview, np.array((3), 'M8[D]'))
 
+    def test_no_format_buffer_unformattable_deprecated(self):
+        # gh-29226: hashlib (and other consumers) request buffers without
+        # PyBUF_FORMAT and previously bypassed the format check. For reference
+        # dtypes like StringDType whose data buffer does not hold the payload,
+        # that is unsafe and now deprecated. Datetime/timedelta still allow
+        # no-format export (buffer holds int64 ticks).
+        import hashlib
+
+        match = "Exporting a buffer without a format string"
+
+        # StringDType cannot be represented as a buffer; memoryview already
+        # errors, but hashlib used to succeed with colliding hashes.
+        sarr = np.asarray(["a" * 100], dtype="T")
+        with pytest.raises(ValueError, match="cannot include dtype"):
+            memoryview(sarr)
+        with pytest.warns(DeprecationWarning, match=match):
+            hashlib.sha256(sarr)
+
+        # Structured dtype with an object field: format succeeds ('O'), so
+        # no-format export is allowed (object arrays are out of scope here).
+        obj_struct = np.zeros(1, dtype=[("a", "O")])
+        obj_struct["a"][0] = object()
+        with warnings.catch_warnings():
+            warnings.simplefilter("error", DeprecationWarning)
+            hashlib.sha256(obj_struct)
+            memoryview(obj_struct)
+
+        # Datetime/timedelta fail memoryview (format) but no-format export
+        # remains allowed because the buffer holds the payload ticks.
+        for arr in (
+            np.array([1], dtype="M8[D]"),
+            np.array([1], dtype="m8[ms]"),
+        ):
+            with pytest.raises(ValueError):
+                memoryview(arr)
+            with warnings.catch_warnings():
+                warnings.simplefilter("error", DeprecationWarning)
+                hashlib.sha256(arr)
+
+        # Object arrays and plain numeric arrays remain formattable, so
+        # hashlib must not warn.
+        with warnings.catch_warnings():
+            warnings.simplefilter("error", DeprecationWarning)
+            hashlib.sha256(np.asarray(["foo"], dtype=object))
+            hashlib.sha256(np.array([1, 2, 3], dtype="i4"))
+
     def test_export_simple_1d(self):
         x = np.array([1, 2, 3, 4, 5], dtype='i')
         y = memoryview(x)
@@ -9468,13 +9514,14 @@ class TestNewBufferProtocol:
             pytest.param(rational2(1, 2), TypeError,
                          id="scalar_new_api")])
     def test_export_and_pickle_user_dtype(self, obj, error):
-        # User dtypes should export successfully when FORMAT was not requested.
+        # User dtypes should export successfully when FORMAT was not requested
+        # (they are not reference dtypes; gh-29226 only deprecates REFCHK).
         with pytest.raises(error):
             _multiarray_tests.get_buffer_info(obj, ("STRIDED_RO", "FORMAT"))
 
         _multiarray_tests.get_buffer_info(obj, ("STRIDED_RO",))
 
-        # This is currently also necessary to implement pickling:
+        # Pickling must still work:
         pickle_obj = pickle.dumps(obj)
         res = pickle.loads(pickle_obj)
         assert_array_equal(res, obj)
