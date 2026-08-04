@@ -3964,41 +3964,80 @@ compare_chararrays(PyObject *NPY_UNUSED(dummy), PyObject *args, PyObject *kwds)
     return NULL;
 }
 
+/*
+ * Python bytes/str (and None) must not round-trip through fixed-width
+ * string arrays: a lone ``\\0`` becomes indistinguishable from padding and
+ * collapses to an empty string (gh-22174). Keep these as Python objects.
+ */
+static int
+_vec_string_is_passthrough_arg(PyObject *obj)
+{
+    return (obj == Py_None || PyBytes_Check(obj) || PyUnicode_Check(obj));
+}
+
 static PyObject *
 _vec_string_with_args(PyArrayObject* char_array, PyArray_Descr* type,
                       PyObject* method, PyObject* args)
 {
     PyObject* broadcast_args[NPY_MAXARGS];
+    PyObject* passthrough[NPY_MAXARGS];
+    int arg_is_passthrough[NPY_MAXARGS];
     PyArrayMultiIterObject* in_iter = NULL;
     PyArrayObject* result = NULL;
     PyArrayIterObject* out_iter = NULL;
-    Py_ssize_t i, n, nargs;
+    Py_ssize_t i, n_broadcast, nargs = 0;
+    int broadcast_slot;
 
-    nargs = PySequence_Size(args) + 1;
-    if (nargs == -1 || nargs > NPY_MAXARGS) {
+    memset(passthrough, 0, sizeof(passthrough));
+    memset(arg_is_passthrough, 0, sizeof(arg_is_passthrough));
+
+    nargs = PySequence_Size(args);
+    if (nargs < 0) {
+        Py_DECREF(type);
+        nargs = 0;
+        goto err;
+    }
+    nargs += 1;
+    if (nargs > NPY_MAXARGS) {
         PyErr_Format(PyExc_ValueError,
                 "len(args) must be < %d", NPY_MAXARGS - 1);
         Py_DECREF(type);
+        nargs = 0;
         goto err;
     }
 
+    /* Method is called as an unbound function: first arg is the string. */
     broadcast_args[0] = (PyObject*)char_array;
+    arg_is_passthrough[0] = 0;
+    n_broadcast = 1;
+
     for (i = 1; i < nargs; i++) {
         PyObject* item = PySequence_GetItem(args, i-1);
         if (item == NULL) {
             Py_DECREF(type);
             goto err;
         }
-        broadcast_args[i] = item;
-        Py_DECREF(item);
+        if (_vec_string_is_passthrough_arg(item)) {
+            /*
+             * Steal the GetItem reference into passthrough; do not include
+             * this argument in the broadcast iterator.
+             */
+            passthrough[i] = item;
+            arg_is_passthrough[i] = 1;
+        }
+        else {
+            broadcast_args[n_broadcast++] = item;
+            arg_is_passthrough[i] = 0;
+            Py_DECREF(item);
+        }
     }
+
     in_iter = (PyArrayMultiIterObject*)PyArray_MultiIterFromObjects
-        (broadcast_args, nargs, 0);
+        (broadcast_args, (int)n_broadcast, 0);
     if (in_iter == NULL) {
         Py_DECREF(type);
         goto err;
     }
-    n = in_iter->numiter;
 
     result = (PyArrayObject*)PyArray_SimpleNewFromDescr(in_iter->nd,
             in_iter->dimensions, type);
@@ -4013,20 +4052,28 @@ _vec_string_with_args(PyArrayObject* char_array, PyArray_Descr* type,
 
     while (PyArray_MultiIter_NOTDONE(in_iter)) {
         PyObject* item_result;
-        PyObject* args_tuple = PyTuple_New(n);
+        PyObject* args_tuple = PyTuple_New(nargs);
         if (args_tuple == NULL) {
             goto err;
         }
 
-        for (i = 0; i < n; i++) {
-            PyArrayIterObject* it = in_iter->iters[i];
-            PyObject* arg = PyArray_ToScalar(PyArray_ITER_DATA(it), it->ao);
-            if (arg == NULL) {
-                Py_DECREF(args_tuple);
-                goto err;
+        broadcast_slot = 0;
+        for (i = 0; i < nargs; i++) {
+            PyObject* arg;
+            if (arg_is_passthrough[i]) {
+                arg = passthrough[i];
+                Py_INCREF(arg);
+            }
+            else {
+                PyArrayIterObject* it = in_iter->iters[broadcast_slot++];
+                arg = PyArray_ToScalar(PyArray_ITER_DATA(it), it->ao);
+                if (arg == NULL) {
+                    Py_DECREF(args_tuple);
+                    goto err;
+                }
             }
             /* Steals ref to arg */
-            PyTuple_SetItem(args_tuple, i, arg);
+            PyTuple_SET_ITEM(args_tuple, i, arg);
         }
 
         item_result = PyObject_CallObject(method, args_tuple);
@@ -4047,12 +4094,18 @@ _vec_string_with_args(PyArrayObject* char_array, PyArray_Descr* type,
         PyArray_ITER_NEXT(out_iter);
     }
 
+    for (i = 0; i < nargs; i++) {
+        Py_XDECREF(passthrough[i]);
+    }
     Py_DECREF(in_iter);
     Py_DECREF(out_iter);
 
     return (PyObject*)result;
 
  err:
+    for (i = 0; i < nargs; i++) {
+        Py_XDECREF(passthrough[i]);
+    }
     Py_XDECREF(in_iter);
     Py_XDECREF(out_iter);
     Py_XDECREF(result);

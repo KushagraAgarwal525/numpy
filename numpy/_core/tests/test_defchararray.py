@@ -877,3 +877,119 @@ def test_empty_indexing():
     # empty chararray instead of a chararray with a single empty string in it.
     s = np.char.chararray((4,))
     assert_(s[[]].size == 0)
+
+
+class TestNullByteSeparator:
+    """
+    Regression tests for gh-22174.
+
+    Fixed-width string coercion treats a lone NUL as padding, so Python
+    ``bytes``/``str`` separators equal to ``\\0`` must not round-trip through
+    ndarrays before being applied.
+    """
+
+    @staticmethod
+    def _bytes_haystack():
+        return np.frombuffer(b'___\0++++' * 3, dtype='S8')
+
+    def test_rsplit_bytes(self):
+        x = self._bytes_haystack()
+        expected = [b'___', b'++++']
+        assert_equal(x[0].rsplit(b'\0'), expected)
+        out = np.char.rsplit(x, b'\0')
+        assert_(issubclass(out.dtype.type, np.object_))
+        assert_equal(out.tolist(), [expected] * 3)
+
+    def test_split_bytes(self):
+        x = self._bytes_haystack()
+        expected = [b'___', b'++++']
+        out = np.char.split(x, b'\0')
+        assert_equal(out.tolist(), [expected] * 3)
+
+    def test_split_rsplit_unicode(self):
+        u = np.array(['ab\0cd', 'x\0y\0z'])
+        assert_equal(np.char.split(u, '\0').tolist(),
+                     [['ab', 'cd'], ['x', 'y', 'z']])
+        assert_equal(np.char.rsplit(u, '\0').tolist(),
+                     [['ab', 'cd'], ['x', 'y', 'z']])
+
+    def test_empty_separator_still_errors(self):
+        x = self._bytes_haystack()
+        with assert_raises_regex(ValueError, 'empty separator'):
+            np.char.rsplit(x, b'')
+        with assert_raises_regex(ValueError, 'empty separator'):
+            np.char.split(x, b'')
+        u = np.array(['a b', 'c'])
+        with assert_raises_regex(ValueError, 'empty separator'):
+            np.char.split(u, '')
+
+    def test_find_count_index(self):
+        x = self._bytes_haystack()
+        assert_array_equal(np.char.find(x, b'\0'), [3, 3, 3])
+        assert_array_equal(np.char.rfind(x, b'\0'), [3, 3, 3])
+        assert_array_equal(np.char.count(x, b'\0'), [1, 1, 1])
+        assert_array_equal(np.char.index(x, b'\0'), [3, 3, 3])
+        assert_array_equal(np.char.rindex(x, b'\0'), [3, 3, 3])
+
+        u = np.array(['ab\0cd', 'no-null'])
+        assert_array_equal(np.strings.find(u, '\0'), [2, -1])
+        assert_array_equal(np.strings.count(u, '\0'), [1, 0])
+
+    def test_startswith_endswith(self):
+        y = np.array([b'\0abc', b'abc'], dtype='S4')
+        assert_array_equal(np.char.startswith(y, b'\0'), [True, False])
+        assert_array_equal(np.char.endswith(y, b'\0'), [False, False])
+
+    def test_partition(self):
+        x = self._bytes_haystack()
+        before, sep, after = np.strings.partition(x, b'\0')
+        assert_array_equal(before, [b'___'] * 3)
+        assert_array_equal(after, [b'++++'] * 3)
+        # Middle field is fixed-width S1 whose buffer holds NUL (same as
+        # np.array(b'\\0')); scalar len is 0 due to padding semantics.
+        assert_equal(sep.dtype.str, '|S1')
+        assert_equal(sep.tobytes(), b'\0' * 3)
+
+        stacked = np.char.partition(x, b'\0')
+        assert_equal(stacked.shape, (3, 3))
+        assert_array_equal(stacked[:, 0], before)
+        assert_array_equal(stacked[:, 2], after)
+
+        u = np.array(['ab\0cd'])
+        b, s, a = np.strings.partition(u, '\0')
+        assert_array_equal(b, ['ab'])
+        assert_array_equal(a, ['cd'])
+        assert_equal(s.tobytes(), b'\0\0\0\0')  # U1
+
+    def test_rpartition(self):
+        x = np.array([b'a\0b\0c'], dtype='S5')
+        before, sep, after = np.strings.rpartition(x, b'\0')
+        assert_array_equal(before, [b'a\0b'])
+        assert_array_equal(after, [b'c'])
+        assert_equal(sep.tobytes(), b'\0')
+
+    def test_replace(self):
+        x = self._bytes_haystack()
+        assert_array_equal(
+            np.strings.replace(x, b'\0', b'|'),
+            [b'___|++++'] * 3)
+        u = np.array(['ab\0cd'])
+        assert_array_equal(np.strings.replace(u, '\0', '|'), ['ab|cd'])
+
+    def test_vec_string_passthrough_none_and_maxsplit(self):
+        a = np.array([b'a b c', b'd e'])
+        assert_equal(np.char.rsplit(a).tolist(),
+                     [[b'a', b'b', b'c'], [b'd', b'e']])
+        assert_equal(np.char.rsplit(a, maxsplit=1).tolist(),
+                     [[b'a b', b'c'], [b'd', b'e']])
+        x = self._bytes_haystack()
+        assert_equal(np.char.rsplit(x, b'\0', maxsplit=1).tolist(),
+                     [[b'___', b'++++']] * 3)
+
+    def test_numpy_bytes_scalar_separator(self):
+        x = self._bytes_haystack()
+        sep = np.bytes_(b'\0')
+        assert_equal(len(sep), 1)
+        assert_equal(np.char.rsplit(x, sep).tolist(),
+                     [[b'___', b'++++']] * 3)
+        assert_array_equal(np.char.find(x, sep), [3, 3, 3])
