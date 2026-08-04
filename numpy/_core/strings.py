@@ -141,6 +141,54 @@ def _clean_args(*args):
     return newargs
 
 
+def _is_pure_null_string(s):
+    """
+    True for a Python ``bytes``/``str`` that is non-empty and only NULs.
+
+    Fixed-width ndarray conversion treats a lone ``\\0`` as padding, so
+    these must not be passed through the string ufuncs as arrays
+    (gh-22174).  ``numpy.bytes_`` / ``numpy.str_`` subclass ``bytes`` /
+    ``str``, so they are included.
+    """
+    if isinstance(s, bytes):
+        return len(s) > 0 and s == b'\0' * len(s)
+    if isinstance(s, str):
+        return len(s) > 0 and s == '\0' * len(s)
+    return False
+
+
+def _vec_string_findlike(a, method, sub, start, end, out_dtype):
+    """Delegate find-like ops to ``_vec_string`` to preserve NUL needles."""
+    a = np.asanyarray(a)
+    args = [sub, start]
+    if end is not None:
+        args.append(end)
+    return _vec_string(a, out_dtype, method, args)
+
+
+def _partition_via_vec_string(a, sep, method):
+    """
+    Implement partition/rpartition via ``_vec_string`` so a pure-NUL
+    separator is not erased by fixed-width string coercion (gh-22174).
+    """
+    a = np.asanyarray(a)
+    parts = _vec_string(a, np.object_, method, [sep])
+    if parts.size == 0:
+        empty = _to_bytes_or_str_array(
+            np.empty(parts.shape, dtype=object), a)
+        return empty, empty.copy(), empty.copy()
+
+    before = np.empty(parts.shape, dtype=object)
+    middle = np.empty(parts.shape, dtype=object)
+    after = np.empty(parts.shape, dtype=object)
+    for idx, triple in np.ndenumerate(parts):
+        before[idx], middle[idx], after[idx] = triple
+    return (
+        _to_bytes_or_str_array(before, a),
+        _to_bytes_or_str_array(middle, a),
+        _to_bytes_or_str_array(after, a),
+    )
+
 def _multiply_dispatcher(a, i):
     return (a,)
 
@@ -286,6 +334,9 @@ def find(a, sub, start=0, end=None):
     array([11])
 
     """
+    if _is_pure_null_string(sub):
+        return _vec_string_findlike(
+            a, 'find', sub, start, end, np.dtype(int))
     end = end if end is not None else MAX
     return _find_ufunc(a, sub, start, end)
 
@@ -329,6 +380,9 @@ def rfind(a, sub, start=0, end=None):
     array([9, 0])
 
     """
+    if _is_pure_null_string(sub):
+        return _vec_string_findlike(
+            a, 'rfind', sub, start, end, np.dtype(int))
     end = end if end is not None else MAX
     return _rfind_ufunc(a, sub, start, end)
 
@@ -363,6 +417,9 @@ def index(a, sub, start=0, end=None):
     array([9])
 
     """
+    if _is_pure_null_string(sub):
+        return _vec_string_findlike(
+            a, 'index', sub, start, end, np.dtype(int))
     end = end if end is not None else MAX
     return _index_ufunc(a, sub, start, end)
 
@@ -397,6 +454,9 @@ def rindex(a, sub, start=0, end=None):
     array([9])
 
     """
+    if _is_pure_null_string(sub):
+        return _vec_string_findlike(
+            a, 'rindex', sub, start, end, np.dtype(int))
     end = end if end is not None else MAX
     return _rindex_ufunc(a, sub, start, end)
 
@@ -442,6 +502,9 @@ def count(a, sub, start=0, end=None):
     array([1, 0, 0])
 
     """
+    if _is_pure_null_string(sub):
+        return _vec_string_findlike(
+            a, 'count', sub, start, end, np.dtype(int))
     end = end if end is not None else MAX
     return _count_ufunc(a, sub, start, end)
 
@@ -483,6 +546,9 @@ def startswith(a, prefix, start=0, end=None):
     array([True,  False])
 
     """
+    if _is_pure_null_string(prefix):
+        return _vec_string_findlike(
+            a, 'startswith', prefix, start, end, np.dtype(bool))
     end = end if end is not None else MAX
     return _startswith_ufunc(a, prefix, start, end)
 
@@ -524,6 +590,9 @@ def endswith(a, suffix, start=0, end=None):
     array([False,  True])
 
     """
+    if _is_pure_null_string(suffix):
+        return _vec_string_findlike(
+            a, 'endswith', suffix, start, end, np.dtype(bool))
     end = end if end is not None else MAX
     return _endswith_ufunc(a, suffix, start, end)
 
@@ -1325,6 +1394,15 @@ def replace(a, old, new, count=-1):
     array(['The dwash was fresh', 'Thwas was it'], dtype='<U19')
 
     """
+    if _is_pure_null_string(old) or _is_pure_null_string(new):
+        # Preserve NUL-only needles/replacements that fixed-width arrays erase.
+        arr = np.asanyarray(a)
+        args = [old, new]
+        if not (isinstance(count, (int, np.integer)) and int(count) == -1):
+            args.append(count)
+        return _to_bytes_or_str_array(
+            _vec_string(arr, np.object_, 'replace', args), arr)
+
     count = np.asanyarray(count)
     if not np.issubdtype(count.dtype, np.integer):
         raise TypeError(f"unsupported type {count.dtype} for operand 'count'")
@@ -1577,6 +1655,9 @@ def partition(a, sep):
      array(['is nice!'], dtype='<U8'))
 
     """
+    if _is_pure_null_string(sep):
+        return _partition_via_vec_string(a, sep, 'partition')
+
     a = np.asanyarray(a)
     sep = np.asanyarray(sep)
 
@@ -1646,6 +1727,9 @@ def rpartition(a, sep):
      array(['', '  ', 'Bba'], dtype='<U3'))
 
     """
+    if _is_pure_null_string(sep):
+        return _partition_via_vec_string(a, sep, 'rpartition')
+
     a = np.asanyarray(a)
     sep = np.asanyarray(sep)
 
