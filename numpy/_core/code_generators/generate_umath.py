@@ -1042,7 +1042,8 @@ defdict = {
           'PyUFunc_RemainderTypeResolver',
           TD(ints, dispatch=[('loops_modulo', ints)]),
           TD(flts),
-          [TypeDescription('m', FullTypeDescr, 'mm', 'm')],
+          [TypeDescription('m', FullTypeDescr, 'mq', 'm'),
+           TypeDescription('m', FullTypeDescr, 'mm', 'm')],
           TD(O, f='PyNumber_Remainder'),
           ),
 'divmod':
@@ -1051,7 +1052,8 @@ defdict = {
           'PyUFunc_DivmodTypeResolver',
           TD(ints, dispatch=[('loops_modulo', ints)]),
           TD(flts),
-          [TypeDescription('m', FullTypeDescr, 'mm', 'qm')],
+          [TypeDescription('m', FullTypeDescr, 'mq', 'mm'),
+           TypeDescription('m', FullTypeDescr, 'mm', 'qm')],
           # TD(O, f='PyNumber_Divmod'),  # gh-9730
           ),
 'hypot':
