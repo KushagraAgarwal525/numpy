@@ -1,0 +1,8 @@
+``take``, ``repeat``, and ``put`` accept read-only ndarray subclasses
+---------------------------------------------------------------------
+
+Converting index or repeat arrays no longer fails with
+"assignment destination is read-only" when the argument is an
+`ndarray` subclass that clears the writeable flag in
+``__array_finalize__``. The conversion now forces a base `ndarray`
+temporary (gh-3758).
