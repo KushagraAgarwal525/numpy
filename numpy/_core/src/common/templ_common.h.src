@@ -13,6 +13,8 @@
  *          npy_longlong, npy_ulonglong#
  *  #MAX = NPY_MAX_INT, NPY_MAX_UINT, NPY_MAX_LONG, NPY_MAX_ULONG,
  *         NPY_MAX_LONGLONG, NPY_MAX_ULONGLONG#
+ *  #MIN = NPY_MIN_INT, 0, NPY_MIN_LONG, 0,
+ *         NPY_MIN_LONGLONG, 0#
  *
  *  #neg = (1,0)*3#
  *  #abs_func = abs*2, labs*2, llabs*2#
@@ -47,6 +49,36 @@ npy_mul_with_overflow_@name@(@type@ * r, @type@ a, @type@ b)
             ) {
         return 1;
     }
+    return 0;
+#endif
+}
+
+/*
+ * writes result of a + b into r
+ * returns 1 if a + b overflowed else returns 0
+ */
+static inline int
+npy_add_with_overflow_@name@(@type@ * r, @type@ a, @type@ b)
+{
+#ifdef HAVE___BUILTIN_ADD_OVERFLOW
+    return __builtin_add_overflow(a, b, r);
+#else
+#if @neg@
+    if (a > 0 && b > @MAX@ - a) {
+        *r = 0;
+        return 1;
+    }
+    if (a < 0 && b < @MIN@ - a) {
+        *r = 0;
+        return 1;
+    }
+#else
+    if (a > @MAX@ - b) {
+        *r = 0;
+        return 1;
+    }
+#endif
+    *r = a + b;
     return 0;
 #endif
 }

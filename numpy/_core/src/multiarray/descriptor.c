@@ -21,7 +21,7 @@
 #include "_datetime.h"
 #include "common.h"
 #include "conversion_utils.h"  /* for PyArray_TypestrConvert */
-#include "templ_common.h" /* for npy_mul_sizes_with_overflow */
+#include "templ_common.h" /* for npy_mul/add_with_overflow helpers */
 #include "descriptor.h"
 #include "npy_static_data.h"
 #include "multiarraymodule.h"  // for thread unsafe state access
@@ -420,6 +420,48 @@ _reject_unsupported_field_dtype(PyArray_Descr *descr)
 }
 
 /*
+ * Structured dtype offsets and itemsize are stored as C int.  Reject
+ * constructions that would overflow so we never produce negative offsets
+ * or an absurdly small itemsize (see gh-12343).
+ */
+static int
+_dtype_size_overflow(void)
+{
+    PyErr_SetString(PyExc_ValueError,
+            "structured dtype size in bytes does not fit into a C int.");
+    return -1;
+}
+
+/* *totalsize = *totalsize + size; returns -1 on overflow with exception set */
+static int
+_add_to_dtype_size(int *totalsize, int size)
+{
+    if (npy_add_with_overflow_int(totalsize, *totalsize, size)) {
+        return _dtype_size_overflow();
+    }
+    return 0;
+}
+
+/*
+ * *totalsize = NPY_NEXT_ALIGNED_OFFSET(*totalsize, alignment);
+ * returns -1 on overflow with exception set.
+ */
+static int
+_align_dtype_size(int *totalsize, int alignment)
+{
+    int tmp;
+
+    if (alignment <= 1) {
+        return 0;
+    }
+    if (npy_add_with_overflow_int(&tmp, *totalsize, alignment - 1)) {
+        return _dtype_size_overflow();
+    }
+    *totalsize = NPY_NEXT_ALIGNED_OFFSET(*totalsize, alignment);
+    return 0;
+}
+
+/*
  * obj is a list.  Each item is a tuple with
  *
  * (field-name, data-type (either a list or a string), and an optional
@@ -548,7 +590,10 @@ _convert_from_array_descr(PyObject *obj, int align)
         if (align) {
             int _align = conv->alignment;
             if (_align > 1) {
-                totalsize = NPY_NEXT_ALIGNED_OFFSET(totalsize, _align);
+                if (_align_dtype_size(&totalsize, _align) < 0) {
+                    Py_DECREF(conv);
+                    goto fail;
+                }
             }
             maxalign = PyArray_MAX(maxalign, _align);
         }
@@ -592,12 +637,17 @@ _convert_from_array_descr(PyObject *obj, int align)
             }
         }
 
-        totalsize += conv->elsize;
+        if (_add_to_dtype_size(&totalsize, conv->elsize) < 0) {
+            Py_DECREF(tup);
+            goto fail;
+        }
         Py_DECREF(tup);
     }
 
     if (maxalign > 1) {
-        totalsize = NPY_NEXT_ALIGNED_OFFSET(totalsize, maxalign);
+        if (_align_dtype_size(&totalsize, maxalign) < 0) {
+            goto fail;
+        }
     }
 
     _PyArray_LegacyDescr *new = (_PyArray_LegacyDescr *)PyArray_DescrNewFromType(NPY_VOID);
@@ -678,7 +728,10 @@ _convert_from_list(PyObject *obj, int align)
         if (align) {
             int _align = conv->alignment;
             if (_align > 1) {
-                totalsize = NPY_NEXT_ALIGNED_OFFSET(totalsize, _align);
+                if (_align_dtype_size(&totalsize, _align) < 0) {
+                    Py_DECREF(conv);
+                    goto fail;
+                }
             }
             maxalign = PyArray_MAX(maxalign, _align);
         }
@@ -707,7 +760,14 @@ _convert_from_list(PyObject *obj, int align)
         if (ret < 0) {
             goto fail;
         }
-        totalsize += conv->elsize;
+        if (_add_to_dtype_size(&totalsize, conv->elsize) < 0) {
+            goto fail;
+        }
+    }
+    if (maxalign > 1) {
+        if (_align_dtype_size(&totalsize, maxalign) < 0) {
+            goto fail;
+        }
     }
     _PyArray_LegacyDescr *new = (_PyArray_LegacyDescr *)PyArray_DescrNewFromType(NPY_VOID);
     if (new == NULL) {
@@ -716,9 +776,6 @@ _convert_from_list(PyObject *obj, int align)
     new->fields = fields;
     new->names = nameslist;
     new->flags = dtypeflags;
-    if (maxalign > 1) {
-        totalsize = NPY_NEXT_ALIGNED_OFFSET(totalsize, maxalign);
-    }
     /* Structured arrays get a sticky aligned bit */
     if (align) {
         new->flags |= NPY_ALIGNED_STRUCT;
@@ -1219,15 +1276,31 @@ _convert_from_dict(PyObject *obj, int align)
                 goto fail;
             }
             else if (offset + newdescr->elsize > totalsize) {
-                totalsize = offset + newdescr->elsize;
+                int end;
+                if (npy_add_with_overflow_int(&end, (int)offset,
+                                              newdescr->elsize)) {
+                    Py_DECREF(ind);
+                    Py_DECREF(tup);
+                    _dtype_size_overflow();
+                    goto fail;
+                }
+                totalsize = end;
             }
         }
         else {
             if (align && _align > 1) {
-                totalsize = NPY_NEXT_ALIGNED_OFFSET(totalsize, _align);
+                if (_align_dtype_size(&totalsize, _align) < 0) {
+                    Py_DECREF(ind);
+                    Py_DECREF(tup);
+                    goto fail;
+                }
             }
             PyTuple_SET_ITEM(tup, 1, PyLong_FromLong(totalsize));
-            totalsize += newdescr->elsize;
+            if (_add_to_dtype_size(&totalsize, newdescr->elsize) < 0) {
+                Py_DECREF(ind);
+                Py_DECREF(tup);
+                goto fail;
+            }
         }
         if (len == 3) {
             PyTuple_SET_ITEM(tup, 2, title);
@@ -1285,12 +1358,14 @@ _convert_from_dict(PyObject *obj, int align)
         dtypeflags |= (newdescr->flags & NPY_FROM_FIELDS);
     }
 
+    if (maxalign > 1) {
+        if (_align_dtype_size(&totalsize, maxalign) < 0) {
+            goto fail;
+        }
+    }
     _PyArray_LegacyDescr *new = (_PyArray_LegacyDescr *)PyArray_DescrNewFromType(NPY_VOID);
     if (new == NULL) {
         goto fail;
-    }
-    if (maxalign > 1) {
-        totalsize = NPY_NEXT_ALIGNED_OFFSET(totalsize, maxalign);
     }
     if (align) {
         new->alignment = maxalign;
