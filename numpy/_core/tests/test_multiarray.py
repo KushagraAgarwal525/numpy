@@ -10978,6 +10978,43 @@ class TestArange:
         assert res_le.dtype == "<i4"
         assert_array_equal(res_le, res_be)
 
+    @pytest.mark.parametrize(
+        "start, stop, step, dtype",
+        [
+            # gh-20226: float64 length lost an element above 2**53
+            (0, 108086391056891901, 1080863910568919, np.uint64),
+            (0, 108086391056891901, 1080863910568919, np.int64),
+            (np.uint64(0), np.uint64(108086391056891901),
+             np.uint64(1080863910568919), np.uint64),
+            # gh-27985: negative large integers collapsed to length 1
+            (0, -9007199254740994, -9007199254740993, np.int64),
+            (np.int64(0), np.int64(-9007199254740994),
+             np.int64(-9007199254740993), np.int64),
+            # sign / empty-range coverage for the integer length path
+            (10, 0, -3, np.int64),
+            (0, 10, 3, np.int64),
+            (5, 5, 1, np.int64),
+            (-5, 5, 2, np.int64),
+        ],
+    )
+    def test_arange_integer_length_matches_range(
+            self, start, stop, step, dtype):
+        # Length must match Python's range() when start/stop/step are integers.
+        expected = np.array(list(range(int(start), int(stop), int(step))),
+                            dtype=dtype)
+        actual = np.arange(start, stop, step, dtype=dtype)
+        assert actual.shape == expected.shape
+        assert_array_equal(actual, expected)
+
+    def test_arange_integer_length_last_element_below_stop(self):
+        # Explicit gh-20226 regression: last + step must stay strictly
+        # below stop for a positive step.
+        start, stop, step = 0, 108086391056891901, 1080863910568919
+        arr = np.arange(start, stop, step, dtype=np.uint64)
+        assert arr.size == 101
+        assert int(arr[-1]) + step < stop
+        assert int(arr[-1]) + step == stop - 1
+
     @pytest.mark.parametrize("which", [0, 1, 2])
     def test_error_paths_and_promotion(self, which):
         args = [0, 1, 2]  # start, stop, and step
