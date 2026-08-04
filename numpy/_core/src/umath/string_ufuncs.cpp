@@ -154,6 +154,30 @@ string_unary_loop(PyArrayMethod_Context *context,
 }
 
 
+/*
+ * Fixed-width byte/unicode strings cannot hold NaN or Inf.  Provide the same
+ * always-False / always-True classification used for integer/bool inputs so
+ * callers like array_equal(..., equal_nan=True) work (gh-16377).
+ */
+template <npy_bool val>
+static int
+string_constant_bool_loop(PyArrayMethod_Context *NPY_UNUSED(context),
+                          char *const data[], npy_intp const dimensions[],
+                          npy_intp const strides[],
+                          NpyAuxData *NPY_UNUSED(auxdata))
+{
+    npy_intp N = dimensions[0];
+    char *out = data[1];
+    npy_intp out_stride = strides[1];
+
+    while (N--) {
+        *(npy_bool *)out = val;
+        out += out_stride;
+    }
+    return 0;
+}
+
+
 template <ENCODING enc>
 static inline void
 string_add(Buffer<enc> buf1, Buffer<enc> buf2, Buffer<enc> out)
@@ -1592,6 +1616,33 @@ init_string_ufuncs(PyObject *umath)
                 &unary_buffer_utf32_methods[i]) < 0) {
             return -1;
         }
+    }
+
+    /* isnan/isinf always False; isfinite always True for fixed-width strings */
+    dtypes[0] = NPY_OBJECT;
+    dtypes[1] = NPY_BOOL;
+    const char *const always_false_names[] = {"isnan", "isinf"};
+    for (int i = 0; i < 2; i++) {
+        if (init_ufunc(
+                umath, always_false_names[i], 1, 1, dtypes, ENCODING::ASCII,
+                string_constant_bool_loop<NPY_FALSE>, NULL, NULL) < 0) {
+            return -1;
+        }
+        if (init_ufunc(
+                umath, always_false_names[i], 1, 1, dtypes, ENCODING::UTF32,
+                string_constant_bool_loop<NPY_FALSE>, NULL, NULL) < 0) {
+            return -1;
+        }
+    }
+    if (init_ufunc(
+            umath, "isfinite", 1, 1, dtypes, ENCODING::ASCII,
+            string_constant_bool_loop<NPY_TRUE>, NULL, NULL) < 0) {
+        return -1;
+    }
+    if (init_ufunc(
+            umath, "isfinite", 1, 1, dtypes, ENCODING::UTF32,
+            string_constant_bool_loop<NPY_TRUE>, NULL, NULL) < 0) {
+        return -1;
     }
 
     dtypes[0] = dtypes[1] = NPY_OBJECT;

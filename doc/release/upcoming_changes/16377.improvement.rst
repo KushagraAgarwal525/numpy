@@ -1,0 +1,9 @@
+``isnan`` / ``isinf`` / ``isfinite`` support fixed-width strings
+---------------------------------------------------------------
+`numpy.isnan`, `numpy.isinf`, and `numpy.isfinite` now accept fixed-width
+byte and unicode string arrays (``dtype='S'`` / ``'U'``).  Strings cannot
+hold NaN or Inf, so ``isnan``/``isinf`` always return ``False`` and
+``isfinite`` always returns ``True``, matching the behaviour already used
+for integer and boolean inputs.  This also makes
+``numpy.array_equal(..., equal_nan=True)`` work for string arrays
+(gh-16377).

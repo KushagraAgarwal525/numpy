@@ -19,6 +19,36 @@ COMPARISONS = [
 
 MAX = np.iinfo(np.int64).max
 
+
+@pytest.mark.parametrize("dtype", ["S", "S10", "U", "U5"])
+@pytest.mark.parametrize(
+    "func, expected",
+    [
+        (np.isnan, False),
+        (np.isinf, False),
+        (np.isfinite, True),
+    ],
+)
+def test_string_fp_classification(dtype, func, expected):
+    # Fixed-width strings cannot hold NaN/Inf; match integer/bool behaviour
+    # so array_equal(..., equal_nan=True) works (gh-16377).
+    arr = np.array(["a", "bc", ""], dtype=dtype)
+    out = func(arr)
+    assert out.dtype == np.dtype(bool)
+    assert_array_equal(out, np.full(arr.shape, expected, dtype=bool))
+    assert func(arr[0]) is np.bool_(expected)
+
+
+@pytest.mark.parametrize("dtype", ["S", "U"])
+def test_array_equal_equal_nan_strings(dtype):
+    a = np.array(list("abc"), dtype=dtype)
+    assert np.array_equal(a, a, equal_nan=True)
+    assert np.array_equal(a, a.copy(), equal_nan=True)
+    assert not np.array_equal(
+        a, np.array(list("abd"), dtype=dtype), equal_nan=True
+    )
+
+
 @pytest.mark.parametrize(["op", "ufunc", "sym"], COMPARISONS)
 def test_mixed_string_comparison_ufuncs_fail(op, ufunc, sym):
     arr_string = np.array(["a", "b"], dtype="S")
