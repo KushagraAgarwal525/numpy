@@ -10936,6 +10936,82 @@ class TestArange:
         assert len(keyword_start_stop) == 6
         assert_array_equal(keyword_stop, keyword_zerotostop)
 
+    def test_complex_real_axis(self):
+        # gh-10332: length used min(ceil(real), ceil(imag)), so imag==0
+        # (the well-defined case) always produced an empty array.
+        assert_array_equal(
+            np.arange(0 + 0j, 10 + 0j, 2 + 0j),
+            np.array([0, 2, 4, 6, 8], dtype=complex),
+        )
+        assert_array_equal(
+            np.arange(0, 10, 2 + 0j),
+            np.array([0, 2, 4, 6, 8], dtype=complex),
+        )
+        assert_array_equal(
+            np.arange(0 + 0j, 10, 2),
+            np.array([0, 2, 4, 6, 8], dtype=complex),
+        )
+        assert_array_equal(
+            np.arange(0 + 0j, 5 + 0j),
+            np.array([0, 1, 2, 3, 4], dtype=complex),
+        )
+
+    def test_complex_imag_axis(self):
+        # Purely imaginary start/stop/step must work the same way.
+        assert_array_equal(
+            np.arange(1j, 10j, 2j),
+            np.array([1j, 3j, 5j, 7j, 9j]),
+        )
+        assert_array_equal(
+            np.arange(0j, 5j, 1j),
+            np.array([0j, 1j, 2j, 3j, 4j]),
+        )
+        assert_array_equal(
+            np.arange(-2j, 2j, 1j),
+            np.array([-2j, -1j, 0j, 1j]),
+        )
+
+    @pytest.mark.parametrize("dtype", [np.complex64, np.complex128])
+    def test_complex_numpy_scalars(self, dtype):
+        start = dtype(0)
+        stop = dtype(10)
+        step = dtype(2)
+        expected = np.array([0, 2, 4, 6, 8], dtype=np.result_type(dtype))
+        assert_array_equal(np.arange(start, stop, step), expected)
+
+        # Diagonal step in the complex plane (still real-valued quotient).
+        assert_array_equal(
+            np.arange(dtype(0), dtype(4 + 4j), dtype(1 + 1j)),
+            np.array([0, 1 + 1j, 2 + 2j, 3 + 3j], dtype=np.result_type(dtype)),
+        )
+
+    def test_complex_empty_and_singleton(self):
+        assert_array_equal(np.arange(5 + 0j, 5 + 0j, 1 + 0j), np.array([], dtype=complex))
+        assert_array_equal(np.arange(5 + 0j, 6 + 0j, 1 + 0j), np.array([5 + 0j]))
+        assert_array_equal(np.arange(5j, 5j, 1j), np.array([], dtype=complex))
+        assert_array_equal(np.arange(0j, 1j, 2j), np.array([0j]))
+
+    def test_complex_requires_collinear_stop(self):
+        # stop not on the line start + t*step → ValueError (gh-10332).
+        with pytest.raises(ValueError, match="real-valued"):
+            np.arange(0, 4 + 4j)
+        with pytest.raises(ValueError, match="real-valued"):
+            np.arange(0, 4 + 4j, 2)
+        with pytest.raises(ValueError, match="real-valued"):
+            np.arange(0 + 0j, 10 + 1j, 2 + 0j)
+        with pytest.raises(ValueError, match="real-valued"):
+            np.arange(0, 10, 1 + 1j)
+
+    def test_complex_descending(self):
+        assert_array_equal(
+            np.arange(10 + 0j, 0 + 0j, -2 + 0j),
+            np.array([10, 8, 6, 4, 2], dtype=complex),
+        )
+        assert_array_equal(
+            np.arange(9j, 0j, -2j),
+            np.array([9j, 7j, 5j, 3j, 1j]),
+        )
+
     def test_arange_booleans(self):
         # Arange makes some sense for booleans and works up to length 2.
         # But it is weird since `arange(2, 4, dtype=bool)` works.
