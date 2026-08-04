@@ -1024,23 +1024,53 @@ PyArray_DiscoverDTypeAndShape_Recursive(
         Py_INCREF(arr);
     }
     else {
-        PyArray_Descr *requested_descr = NULL;
-        if (*flags & DESCRIPTOR_WAS_SET) {
-            /* __array__ may be passed the requested descriptor if provided */
-            requested_descr = *out_descr;
+        /*
+         * When coercing into an object array and we have already reached
+         * ``max_dims`` (as for ``obj_arr[...] = nested_list``), packing will
+         * store the original Python object (see ``PyArray_Pack`` for
+         * ``NPY_OBJECT`` and ``PyArray_AssignFromCache_Recursive``).  Calling
+         * ``__array__`` / other array-like protocols here is therefore wasted
+         * work and can be catastrophic for objects whose conversion is
+         * expensive (gh-24336).
+         *
+         * Be precise: only skip when max dims were requested and the
+         * destination DType is object.  Top-level ``arr[...] = array_like``
+         * (curr_dims == 0) and ``np.array([...], dtype=object)`` without a
+         * depth limit still convert array-likes as before.
+         */
+        int skip_array_like = 0;
+        if (curr_dims == max_dims) {
+            if ((*flags & DESCRIPTOR_WAS_SET) &&
+                    (*out_descr)->type_num == NPY_OBJECT) {
+                skip_array_like = 1;
+            }
+            else if (fixed_DType != NULL &&
+                     fixed_DType->type_num == NPY_OBJECT) {
+                skip_array_like = 1;
+            }
         }
-        int was_copied_by__array__ = 0;
-        arr = (PyArrayObject *)_array_from_array_like(obj,
-                requested_descr, 0, copy, &was_copied_by__array__);
-        if (arr == NULL) {
-            return -1;
-        }
-        else if (arr == (PyArrayObject *)Py_NotImplemented) {
-            Py_DECREF(arr);
+        if (skip_array_like) {
             arr = NULL;
         }
-        if (was_copied_by__array__ == 1) {
-            *flags |= COPY_WAS_CREATED_BY__ARRAY__;
+        else {
+            PyArray_Descr *requested_descr = NULL;
+            if (*flags & DESCRIPTOR_WAS_SET) {
+                /* __array__ may be passed the requested descriptor if provided */
+                requested_descr = *out_descr;
+            }
+            int was_copied_by__array__ = 0;
+            arr = (PyArrayObject *)_array_from_array_like(obj,
+                    requested_descr, 0, copy, &was_copied_by__array__);
+            if (arr == NULL) {
+                return -1;
+            }
+            else if (arr == (PyArrayObject *)Py_NotImplemented) {
+                Py_DECREF(arr);
+                arr = NULL;
+            }
+            if (was_copied_by__array__ == 1) {
+                *flags |= COPY_WAS_CREATED_BY__ARRAY__;
+            }
         }
     }
     if (arr != NULL) {

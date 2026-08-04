@@ -674,6 +674,57 @@ class TestArrayLikes:
         empty[:] = [obj]
         assert empty[0] is obj
 
+    def test_object_slice_assignment_skips_array(self):
+        # gh-24336: assigning nested lists into an object array must not call
+        # ``__array__`` on the stored objects.  Packing keeps the originals,
+        # so the protocol call was pure waste (and can OOM for expensive
+        # conversions).
+        class ArrayLike:
+            def __init__(self, label):
+                self.label = label
+                self.array_called = 0
+
+            def __array__(self, dtype=None, copy=None):
+                self.array_called += 1
+                # Deliberately return a non-scalar so a mistaken conversion
+                # would change shape / stored type.
+                return np.eye(2)
+
+            def __repr__(self):
+                return f"ArrayLike({self.label!r})"
+
+        # 1-D slice assignment
+        objs = [ArrayLike("a"), ArrayLike("b")]
+        dest = np.empty(2, dtype=object)
+        dest[:] = objs
+        assert dest[0] is objs[0]
+        assert dest[1] is objs[1]
+        assert objs[0].array_called == 0
+        assert objs[1].array_called == 0
+
+        # Nested 2-D assignment
+        nested = [[ArrayLike("I"), ArrayLike("X")],
+                  [ArrayLike("Y"), ArrayLike("Z")]]
+        dest2 = np.empty((2, 2), dtype=object)
+        dest2[:] = nested
+        for i in range(2):
+            for j in range(2):
+                assert dest2[i, j] is nested[i][j]
+                assert nested[i][j].array_called == 0
+
+        # Scalar indexing still must not call ``__array__`` either
+        scalar_obj = ArrayLike("scalar")
+        dest[0] = scalar_obj
+        assert dest[0] is scalar_obj
+        assert scalar_obj.array_called == 0
+
+        # Top-level assignment of a bare array-like still converts (broadcast)
+        bare = ArrayLike("bare")
+        dest2d = np.empty((2, 2), dtype=object)
+        dest2d[:] = bare
+        assert bare.array_called == 1
+        assert_array_equal(dest2d, np.eye(2))
+
     def test_0d_generic_special_case(self):
         class ArraySubclass(np.ndarray):
             def __float__(self):
