@@ -1552,8 +1552,8 @@ def _interp_reject_stringlike(a, name, input_dtype):
     a = np.asanyarray(a)
     if a.dtype.kind in 'SUT':
         raise TypeError(
-            f"Cannot cast {name} from dtype({a.dtype!r}) to "
-            f"dtype({np.dtype(input_dtype)!r}) according to the rule 'safe'"
+            f"Cannot cast {name} from {a.dtype!r} to "
+            f"{np.dtype(input_dtype)!r} according to the rule 'safe'"
         )
     return a
 
