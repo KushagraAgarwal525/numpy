@@ -1,0 +1,6 @@
+Zero weights in `numpy.average` omit non-finite values
+-----------------------------------------------------
+A weight of exactly zero now omits the corresponding value from the
+weighted product inside `numpy.average`.  Previously ``0 * inf`` and
+``0 * nan`` produced ``nan``, so zero weights could not be used to ignore
+non-finite data (gh-25362).

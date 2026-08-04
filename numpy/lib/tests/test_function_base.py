@@ -541,6 +541,109 @@ class TestAverage:
         a = np.array([Fraction(1, 5), Fraction(3, 5)])
         assert_equal(np.average(a), Fraction(2, 5))
 
+    def test_zero_weight_omits_nonfinite(self):
+        # gh-25362: 0 * inf / 0 * nan must not poison the average
+        assert_equal(np.average([np.inf, 1.0], weights=[0.0, 1.0]), 1.0)
+        assert_equal(np.average([1.0, np.inf], weights=[1.0, 0.0]), 1.0)
+        assert_equal(np.average([np.nan, 2.0], weights=[0.0, 1.0]), 2.0)
+        assert_equal(np.average([-np.inf, 3.0], weights=[0, 1]), 3.0)
+
+        # Unrelated finite values with a zero weight stay unchanged
+        assert_equal(np.average([10.0, 20.0], weights=[1.0, 0.0]), 10.0)
+        assert_equal(np.average([10.0, 20.0], weights=[0.0, 1.0]), 20.0)
+
+        # Axis-wise: omit an infinite entry in one column only
+        a = np.array([[np.inf, 1.0], [2.0, 3.0]])
+        w = np.array([[0.0, 1.0], [1.0, 1.0]])
+        assert_array_equal(np.average(a, weights=w, axis=0), [2.0, 2.0])
+
+        # returned=True still reports the sum of weights (zeros included as 0)
+        avg, scl = np.average([np.inf, 1.0, 3.0], weights=[0.0, 1.0, 1.0],
+                              returned=True)
+        assert_equal(avg, 2.0)
+        assert_equal(scl, 2.0)
+
+        # Complex non-finite with a zero weight
+        assert_equal(
+            np.average([np.inf + 0j, 1 + 2j], weights=[0.0, 1.0]),
+            1 + 2j,
+        )
+
+    def test_where_without_weights(self):
+        a = np.array([1.0, 2.0, 3.0, 4.0])
+        assert_equal(np.average(a, where=[True, True, False, False]), 1.5)
+        assert_equal(np.average(a, where=np.array([False, True, True, False])),
+                     2.5)
+        # Integer 0/1 masks are accepted like np.mean
+        assert_equal(np.average(a, where=[1, 1, 0, 0]), 1.5)
+
+        # matches mean
+        where = np.array([True, False, True, True])
+        assert_equal(np.average(a, where=where), np.mean(a, where=where))
+
+        avg, scl = np.average(a, where=where, returned=True)
+        assert_equal(avg, np.mean(a, where=where))
+        assert_equal(scl, 3.0)
+
+        # 2-D with axis
+        x = np.arange(6, dtype=float).reshape(2, 3)
+        where = np.array([[True, False, True],
+                          [False, True, True]])
+        assert_array_almost_equal(
+            np.average(x, axis=1, where=where),
+            np.mean(x, axis=1, where=where),
+        )
+        assert_array_almost_equal(
+            np.average(x, axis=0, where=where, keepdims=True),
+            np.mean(x, axis=0, where=where, keepdims=True),
+        )
+
+        with pytest.raises(ZeroDivisionError):
+            np.average(a, where=False)
+
+    def test_where_with_weights(self):
+        # Explicit where as suggested for gh-25362
+        x = np.array([np.inf, 1.0, 2.0])
+        w = np.array([0.0, 1.0, 1.0])
+        assert_equal(np.average(x, weights=w, where=(w != 0)), 1.5)
+
+        # where can exclude a positive-weight entry
+        a = np.array([1.0, 2.0, 3.0])
+        weights = np.array([1.0, 1.0, 1.0])
+        where = np.array([True, False, True])
+        assert_equal(np.average(a, weights=weights, where=where), 2.0)
+        avg, scl = np.average(a, weights=weights, where=where, returned=True)
+        assert_equal(avg, 2.0)
+        assert_equal(scl, 2.0)
+
+        # where broadcasts with a
+        y = np.array([[1.0, 2.0], [3.0, 4.0]])
+        w2 = np.array([1.0, 3.0])
+        where_col = np.array([True, False])
+        # average along axis=1 with per-column weights, masking second column
+        assert_array_almost_equal(
+            np.average(y, axis=1, weights=w2, where=where_col),
+            np.array([1.0, 3.0]),
+        )
+
+        # keepdims + where + weights
+        avg = np.average(y, axis=1, weights=w2, where=[True, True],
+                         keepdims=True)
+        assert avg.shape == (2, 1)
+        assert_array_almost_equal(avg.ravel(),
+                                  np.average(y, axis=1, weights=w2))
+
+        # where excludes everything that has nonzero weight -> ZeroDivisionError
+        with pytest.raises(ZeroDivisionError):
+            np.average(a, weights=weights, where=False)
+
+        # Combining where with automatic zero-weight omission
+        a2 = np.array([np.inf, np.nan, 5.0, 7.0])
+        w3 = np.array([0.0, 1.0, 0.0, 1.0])
+        where2 = np.array([True, False, True, True])
+        # second entry excluded by where (would be nan*1), third has zero weight
+        assert_equal(np.average(a2, weights=w3, where=where2), 7.0)
+
 
 class TestSelect:
     choices = [np.array([1, 2, 3]),

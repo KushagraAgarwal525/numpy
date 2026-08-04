@@ -1,0 +1,9 @@
+``where`` keyword for `numpy.average`
+-------------------------------------
+`numpy.average` now accepts a ``where`` argument, analogous to `numpy.mean`,
+to select which elements participate in the average and weight sum.
+
+In addition, exact zero weights omit the corresponding values from the
+weighted product.  This allows a weight of ``0`` to ignore non-finite
+entries without producing ``0 * inf`` or ``0 * nan`` results
+(gh-25362).
