@@ -6,6 +6,7 @@
 #include <structmember.h>
 
 #include "numpy/arrayobject.h"
+#include "numpy/npy_math.h"
 #include "lowlevel_strided_loops.h"
 #include "dtypemeta.h"
 
@@ -34,6 +35,25 @@ power_of_ten(int n)
         }
     }
     return ret;
+}
+
+/*
+ * Select a working floating dtype for scale/rint/unscale rounding so that
+ * finite values do not overflow the intermediate multiply/divide.
+ * float16 and float32 use float64; float64 uses longdouble when it is wider.
+ */
+static int
+round_working_typenum(int type_num)
+{
+    if (type_num == NPY_HALF || type_num == NPY_FLOAT) {
+        return NPY_DOUBLE;
+    }
+#if NPY_SIZEOF_LONGDOUBLE > NPY_SIZEOF_DOUBLE
+    if (type_num == NPY_DOUBLE) {
+        return NPY_LONGDOUBLE;
+    }
+#endif
+    return type_num;
 }
 
 NPY_NO_EXPORT PyObject *
@@ -662,7 +682,49 @@ PyArray_Round(PyArrayObject *a, int decimals, PyArrayObject *out)
             decimals = -decimals;
         }
     }
-    if (!out) {
+    /*
+     * For float16/float32 (and float64 when longdouble is wider), perform
+     * scale/rint/unscale in a wider dtype so intermediate values do not
+     * overflow (gh-13699).
+     */
+    PyArrayObject *orig_a = a;
+    PyArrayObject *user_out = out;
+    PyArrayObject *work_a = NULL;
+    PyArrayObject *work_out = NULL;
+    int type_num = PyArray_TYPE(a);
+    int work_typenum = type_num;
+
+    if (PyArray_ISFLOAT(a)) {
+        work_typenum = round_working_typenum(type_num);
+    }
+
+    if (work_typenum != type_num) {
+        PyArray_Descr *work_descr = PyArray_DescrFromType(work_typenum);
+        if (work_descr == NULL) {
+            return NULL;
+        }
+        work_a = (PyArrayObject *)PyArray_CastToType(a, work_descr, 0);
+        if (work_a == NULL) {
+            return NULL;
+        }
+        a = work_a;
+
+        work_descr = PyArray_DescrFromType(work_typenum);
+        if (work_descr == NULL) {
+            Py_DECREF(work_a);
+            return NULL;
+        }
+        work_out = (PyArrayObject *)PyArray_Empty(PyArray_NDIM(a),
+                                                  PyArray_DIMS(a),
+                                                  work_descr,
+                                                  PyArray_ISFORTRAN(a));
+        if (work_out == NULL) {
+            Py_DECREF(work_a);
+            return NULL;
+        }
+        out = work_out;
+    }
+    else if (!out) {
         if (PyArray_ISINTEGER(a)) {
             ret_int = 1;
             my_descr = PyArray_DescrFromType(NPY_DOUBLE);
@@ -683,6 +745,13 @@ PyArray_Round(PyArrayObject *a, int decimals, PyArrayObject *out)
     }
     f = PyFloat_FromDouble(power_of_ten(decimals));
     if (f == NULL) {
+        Py_XDECREF(work_a);
+        if (work_out) {
+            Py_DECREF(work_out);
+        }
+        else {
+            Py_DECREF(out);
+        }
         return NULL;
     }
     ret = PyObject_CallFunction(op1, "OOO", a, f, out);
@@ -704,13 +773,61 @@ PyArray_Round(PyArrayObject *a, int decimals, PyArrayObject *out)
     }
     Py_DECREF(tmp);
 
+    /*
+     * When the working dtype is still float64 (longdouble not wider),
+     * scale can overflow for huge inputs. At those magnitudes the value
+     * is already an integer at any practical decimal scale, so restore
+     * finite inputs that became non-finite.
+     */
+    if (ret != NULL && type_num == NPY_DOUBLE && work_typenum == NPY_DOUBLE &&
+            PyArray_IS_C_CONTIGUOUS((PyArrayObject *)ret) &&
+            PyArray_IS_C_CONTIGUOUS(orig_a) &&
+            PyArray_TYPE(orig_a) == NPY_DOUBLE) {
+        npy_intp i, n = PyArray_SIZE((PyArrayObject *)ret);
+        double *out_ptr = (double *)PyArray_DATA((PyArrayObject *)ret);
+        double *in_ptr = (double *)PyArray_DATA(orig_a);
+        for (i = 0; i < n; ++i) {
+            if (npy_isfinite(in_ptr[i]) && !npy_isfinite(out_ptr[i])) {
+                out_ptr[i] = in_ptr[i];
+            }
+        }
+    }
+
  finish:
     Py_DECREF(f);
-    Py_DECREF(out);
+    Py_XDECREF(work_a);
+    if (work_out != NULL) {
+        if (ret != NULL) {
+            if (user_out != NULL) {
+                if (PyArray_AssignArray(user_out, work_out,
+                                        NULL, NPY_UNSAFE_CASTING) < 0) {
+                    Py_DECREF(ret);
+                    ret = NULL;
+                }
+                else {
+                    Py_DECREF(ret);
+                    Py_INCREF(user_out);
+                    ret = (PyObject *)user_out;
+                }
+            }
+            else {
+                PyArray_Descr *out_descr = PyArray_DESCR(orig_a);
+                Py_INCREF(out_descr);
+                tmp = PyArray_CastToType(work_out, out_descr,
+                                         PyArray_ISFORTRAN(orig_a));
+                Py_DECREF(ret);
+                ret = tmp;
+            }
+        }
+        Py_DECREF(work_out);
+    }
+    else {
+        Py_DECREF(out);
+    }
     if (ret_int && ret != NULL) {
-        Py_INCREF(PyArray_DESCR(a));
+        Py_INCREF(PyArray_DESCR(orig_a));
         tmp = PyArray_CastToType((PyArrayObject *)ret,
-                                 PyArray_DESCR(a), PyArray_ISFORTRAN(a));
+                                 PyArray_DESCR(orig_a), PyArray_ISFORTRAN(orig_a));
         Py_DECREF(ret);
         return tmp;
     }

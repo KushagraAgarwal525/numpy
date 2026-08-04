@@ -2238,6 +2238,56 @@ class TestMethods:
         check_round(np.array([4.5 + 1.5j]), [4 + 2j])
         check_round(np.array([12.5 + 15.5j]), [10 + 20j], -1)
 
+    def test_round_float16_no_overflow(self):
+        # gh-13699: scale/rint/unscale must not overflow float16 intermediates
+        assert_equal(np.round(np.float16(2.0), 5), np.float16(2.0))
+        assert_equal(np.round(np.array([2.0], dtype=np.float16), 5),
+                     np.array([2.0], dtype=np.float16))
+
+        a = np.array([1505.1, 880.4, 624.6], dtype=np.float16)
+        # Compare against rounding in float64 then casting back
+        expected = np.round(a.astype(np.float64), 2).astype(np.float16)
+        assert_equal(np.round(a, 2), expected)
+
+        out = np.empty_like(a)
+        res = np.round(a, 2, out=out)
+        assert res is out
+        assert_equal(out, expected)
+
+        # Values that need a fractional round where float16*1e5 overflows
+        x = np.float16(1.234)
+        assert_equal(np.round(x, 5),
+                     np.round(np.float64(x), 5).astype(np.float16))
+
+    def test_round_float32_no_overflow(self):
+        # Intermediate scale for large decimals must not overflow float32
+        x = np.float32(400.123456)
+        expected = np.round(np.float64(x), 20).astype(np.float32)
+        assert_equal(np.round(x, 20), expected)
+        a = np.array([400.123456, -400.123456], dtype=np.float32)
+        expected = np.round(a.astype(np.float64), 20).astype(np.float32)
+        assert_equal(np.round(a, 20), expected)
+
+    def test_round_float64_huge_no_overflow(self):
+        # gh-13699 / related: huge float64 values must not become inf
+        x = np.float64(1e304)
+        assert_equal(np.round(x, 5), x)
+        a = np.array([1e304, -1e304, 1.5], dtype=np.float64)
+        got = np.round(a, 5)
+        assert_equal(got[0], a[0])
+        assert_equal(got[1], a[1])
+        assert_equal(got[2], 1.5)
+        # decimals=0 still rounds 1.5 to even
+        assert_equal(np.round(a, 0)[2], 2.0)
+
+    def test_round_complex64_float16_path(self):
+        # complex real/imag go through the float path
+        z = np.complex64(2 + 3.14159j)
+        got = np.round(z, 5)
+        assert_equal(got.real, np.round(np.float32(2.0), 5))
+        assert_equal(got.imag,
+                     np.round(np.float32(z.imag), 5))
+
     @pytest.mark.parametrize('dt', ['uint8', int, float, complex])
     def test_round_copies(self, dt):
         a = np.arange(3, dtype=dt)
