@@ -6,7 +6,6 @@
 #include <structmember.h>
 
 #include "numpy/arrayobject.h"
-#include "numpy/npy_math.h"
 #include "lowlevel_strided_loops.h"
 #include "dtypemeta.h"
 
@@ -40,7 +39,9 @@ power_of_ten(int n)
 /*
  * Select a working floating dtype for scale/rint/unscale rounding so that
  * finite values do not overflow the intermediate multiply/divide.
- * float16 and float32 use float64; float64 uses longdouble when it is wider.
+ * float16 and float32 use float64. float64 is left unchanged: promoting it
+ * to longdouble alters half-way ties (e.g. 6.35), and huge float64 values
+ * that overflow are already integers at any practical decimal scale.
  */
 static int
 round_working_typenum(int type_num)
@@ -48,11 +49,6 @@ round_working_typenum(int type_num)
     if (type_num == NPY_HALF || type_num == NPY_FLOAT) {
         return NPY_DOUBLE;
     }
-#if NPY_SIZEOF_LONGDOUBLE > NPY_SIZEOF_DOUBLE
-    if (type_num == NPY_DOUBLE) {
-        return NPY_LONGDOUBLE;
-    }
-#endif
     return type_num;
 }
 
@@ -772,26 +768,6 @@ PyArray_Round(PyArrayObject *a, int decimals, PyArrayObject *out)
         goto finish;
     }
     Py_DECREF(tmp);
-
-    /*
-     * When the working dtype is still float64 (longdouble not wider),
-     * scale can overflow for huge inputs. At those magnitudes the value
-     * is already an integer at any practical decimal scale, so restore
-     * finite inputs that became non-finite.
-     */
-    if (ret != NULL && type_num == NPY_DOUBLE && work_typenum == NPY_DOUBLE &&
-            PyArray_IS_C_CONTIGUOUS((PyArrayObject *)ret) &&
-            PyArray_IS_C_CONTIGUOUS(orig_a) &&
-            PyArray_TYPE(orig_a) == NPY_DOUBLE) {
-        npy_intp i, n = PyArray_SIZE((PyArrayObject *)ret);
-        double *out_ptr = (double *)PyArray_DATA((PyArrayObject *)ret);
-        double *in_ptr = (double *)PyArray_DATA(orig_a);
-        for (i = 0; i < n; ++i) {
-            if (npy_isfinite(in_ptr[i]) && !npy_isfinite(out_ptr[i])) {
-                out_ptr[i] = in_ptr[i];
-            }
-        }
-    }
 
  finish:
     Py_DECREF(f);

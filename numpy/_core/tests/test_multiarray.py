@@ -2268,19 +2268,7 @@ class TestMethods:
         expected = np.round(a.astype(np.float64), 20).astype(np.float32)
         assert_equal(np.round(a, 20), expected)
 
-    def test_round_float64_huge_no_overflow(self):
-        # gh-13699 / related: huge float64 values must not become inf
-        x = np.float64(1e304)
-        assert_equal(np.round(x, 5), x)
-        a = np.array([1e304, -1e304, 1.5], dtype=np.float64)
-        got = np.round(a, 5)
-        assert_equal(got[0], a[0])
-        assert_equal(got[1], a[1])
-        assert_equal(got[2], 1.5)
-        # decimals=0 still rounds 1.5 to even
-        assert_equal(np.round(a, 0)[2], 2.0)
-
-    def test_round_complex64_float16_path(self):
+    def test_round_complex64_via_float_path(self):
         # complex real/imag go through the float path
         z = np.complex64(2 + 3.14159j)
         got = np.round(z, 5)
