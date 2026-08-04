@@ -2537,15 +2537,15 @@ class TestMaximum(_FilterInvalids):
         assert_equal(np.maximum(arg1, arg2), out)
 
     def test_object_nans(self):
-        # Multiple checks to give this a chance to
-        # fail if cmp is used instead of rich compare.
-        # Failure cannot be guaranteed.
-        for i in range(1):
-            x = np.array(float('nan'), object)
-            y = 1.0
-            z = np.array(float('nan'), object)
-            assert_(np.maximum(x, y) == 1.0)
-            assert_(np.maximum(z, y) == 1.0)
+        # gh-5041: object maximum propagates NaN like float maximum.
+        # (Previously this returned 1.0 via order-dependent ObjectMax.)
+        x = np.array(float('nan'), object)
+        y = 1.0
+        z = np.array(float('nan'), object)
+        assert_(np.isnan(np.maximum(x, y)))
+        assert_(np.isnan(np.maximum(z, y)))
+        assert_(np.isnan(np.maximum(y, x)))
+        assert_equal(np.maximum(np.array(2.0, object), y), 2.0)
 
     def test_complex_nans(self):
         nan = np.nan
@@ -2635,15 +2635,15 @@ class TestMinimum(_FilterInvalids):
         assert_equal(np.minimum(arg1, arg2), out)
 
     def test_object_nans(self):
-        # Multiple checks to give this a chance to
-        # fail if cmp is used instead of rich compare.
-        # Failure cannot be guaranteed.
-        for i in range(1):
-            x = np.array(float('nan'), object)
-            y = 1.0
-            z = np.array(float('nan'), object)
-            assert_(np.minimum(x, y) == 1.0)
-            assert_(np.minimum(z, y) == 1.0)
+        # gh-5041: object minimum propagates NaN like float minimum.
+        # (Previously this returned 1.0 via order-dependent ObjectMin.)
+        x = np.array(float('nan'), object)
+        y = 1.0
+        z = np.array(float('nan'), object)
+        assert_(np.isnan(np.minimum(x, y)))
+        assert_(np.isnan(np.minimum(z, y)))
+        assert_(np.isnan(np.minimum(y, x)))
+        assert_equal(np.minimum(np.array(0.0, object), y), 0.0)
 
     def test_complex_nans(self):
         nan = np.nan
