@@ -307,6 +307,32 @@ def dtype_to_descr(dtype):
         return dtype.str
 
 
+def _aligned_dtype_if_matching(names, formats, titles, offsets, itemsize):
+    """
+    Return ``dtype(..., align=True)`` when it matches the given field layout.
+
+    Used by `descr_to_dtype` to restore the sticky ``isalignedstruct`` flag when
+    the npy/npz descriptor encodes C alignment padding.  Layouts that are
+    already packed without padding (or use non-aligned explicit offsets) do not
+    match; then return ``None`` so the caller keeps ``isalignedstruct`` False.
+    """
+    if not names:
+        return None
+    align_kwargs = {'names': names, 'formats': formats}
+    if any(title is not None for title in titles):
+        align_kwargs['titles'] = titles
+    try:
+        aligned = numpy.dtype(align_kwargs, align=True)
+    except (TypeError, ValueError):
+        return None
+    if aligned.itemsize != itemsize:
+        return None
+    if not all(aligned.fields[name][1] == offset
+               for name, offset in zip(names, offsets)):
+        return None
+    return aligned
+
+
 @set_module("numpy.lib.format")
 def descr_to_dtype(descr):
     """
@@ -316,6 +342,10 @@ def descr_to_dtype(descr):
     remove the valueless padding fields created by, i.e. simple fields like
     dtype('float32'), and then convert the description to its corresponding
     dtype.
+
+    When the description includes alignment padding voids whose offsets match
+    a C-aligned structured dtype, the result has ``isalignedstruct`` set so
+    that ``np.save`` / ``np.load`` round-trips preserve ``align=True``.
 
     Parameters
     ----------
@@ -342,6 +372,7 @@ def descr_to_dtype(descr):
     formats = []
     offsets = []
     offset = 0
+    had_padding = False
     for field in descr:
         if len(field) == 2:
             name, descr_str = field
@@ -353,13 +384,24 @@ def descr_to_dtype(descr):
         # Ignore padding bytes, which will be void bytes with '' as name
         # Once support for blank names is removed, only "if name == ''" needed)
         is_pad = (name == '' and dt.type is numpy.void and dt.names is None)
-        if not is_pad:
+        if is_pad:
+            had_padding = True
+        else:
             title, name = name if isinstance(name, tuple) else (None, name)
             titles.append(title)
             names.append(name)
             formats.append(dt)
             offsets.append(offset)
         offset += dt.itemsize
+
+    # Restore isalignedstruct when padding voids match C alignment (gh-28973).
+    # Without padding, align=True and align=False share the same .descr, so the
+    # sticky flag cannot be recovered from the descriptor alone.
+    if had_padding:
+        aligned = _aligned_dtype_if_matching(
+            names, formats, titles, offsets, offset)
+        if aligned is not None:
+            return aligned
 
     return numpy.dtype({'names': names, 'formats': formats, 'titles': titles,
                         'offsets': offsets, 'itemsize': offset})
