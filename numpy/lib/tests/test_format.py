@@ -552,6 +552,10 @@ def test_load_padded_dtype(tmpdir, dt):
     with np.load(npz_file) as npz:
         arr1 = npz['arr']
     assert_array_equal(arr, arr1)
+    # dtype equality ignores isalignedstruct; check the sticky flag explicitly
+    # when the original layout needed alignment padding (gh-28973).
+    assert_equal_(arr1.dtype.isalignedstruct, dt.isalignedstruct)
+
 
 
 @pytest.mark.filterwarnings(
@@ -670,9 +674,117 @@ def test_pickle_disallow(tmpdir):
 def test_descr_to_dtype(dt):
     dt1 = format.descr_to_dtype(dt.descr)
     assert_equal_(dt1, dt)
+    assert_equal_(dt1.isalignedstruct, dt.isalignedstruct)
     arr1 = np.zeros(3, dt)
     arr2 = roundtrip(arr1)
     assert_array_equal(arr1, arr2)
+    assert_equal_(arr2.dtype.isalignedstruct, dt.isalignedstruct)
+
+
+# Structured dtypes where alignment padding appears in .descr (gh-28973).
+_ALIGNED_PADDED_DTYPES = [
+    np.dtype('i1, i4, i1', align=True),
+    np.dtype([('a', np.int8), ('b', np.int32), ('c', np.int8)], align=True),
+    np.dtype([('a', np.int32), ('b', np.float32), ('c', np.bool_), ('d', 'U9')],
+             align=True),
+    np.dtype([('x', np.int16), ('y', np.int64)], align=True),
+    np.dtype({'names': ['a', 'b'],
+              'formats': ['i1', 'i4'],
+              'titles': ['aa', 'bb']}, align=True),
+]
+
+
+@pytest.mark.parametrize("dt", _ALIGNED_PADDED_DTYPES)
+def test_descr_to_dtype_preserves_aligned_flag(dt):
+    # .descr alone used to lose isalignedstruct even when padding voids encode
+    # a C-aligned layout.
+    assert_(dt.isalignedstruct)
+    assert_(any(field[0] == '' for field in dt.descr))
+    dt1 = format.descr_to_dtype(dt.descr)
+    assert_equal_(dt1, dt)
+    assert_(dt1.isalignedstruct)
+    assert_equal_(dt1.itemsize, dt.itemsize)
+    for name in dt.names:
+        assert_equal_(dt1.fields[name][1], dt.fields[name][1])
+
+
+@pytest.mark.parametrize("dt", _ALIGNED_PADDED_DTYPES)
+def test_save_load_preserves_aligned_flag(tmpdir, dt):
+    arr = np.zeros(4, dtype=dt)
+    npy_path = os.path.join(tmpdir, 'aligned.npy')
+    npz_path = os.path.join(tmpdir, 'aligned.npz')
+    np.save(npy_path, arr)
+    np.savez(npz_path, arr=arr)
+
+    loaded = np.load(npy_path)
+    assert_array_equal(loaded, arr)
+    assert_(loaded.dtype.isalignedstruct)
+    assert_equal_(loaded.dtype.itemsize, dt.itemsize)
+
+    with np.load(npz_path) as npz:
+        loaded_npz = npz['arr']
+    assert_array_equal(loaded_npz, arr)
+    assert_(loaded_npz.dtype.isalignedstruct)
+
+
+def test_descr_to_dtype_nonaligned_explicit_offsets():
+    # Explicit non-C-aligned offsets must not gain isalignedstruct.
+    dt = np.dtype({'names': ['a', 'b'], 'formats': ['i4', 'i4'],
+                   'offsets': [1, 6]})
+    assert_(not dt.isalignedstruct)
+    dt1 = format.descr_to_dtype(dt.descr)
+    assert_equal_(dt1, dt)
+    assert_(not dt1.isalignedstruct)
+
+
+def test_descr_to_dtype_packed_without_padding():
+    # Packed layouts without padding voids cannot encode the sticky flag;
+    # both aligned and unaligned forms share the same .descr.
+    dt = np.dtype([('a', 'i4'), ('b', 'i4')])
+    assert_(not dt.isalignedstruct)
+    assert_(not any(field[0] == '' for field in dt.descr))
+    dt1 = format.descr_to_dtype(dt.descr)
+    assert_equal_(dt1, dt)
+    assert_(not dt1.isalignedstruct)
+
+
+def test_descr_to_dtype_unaligned_packed_with_gaps():
+    # Packed but non-aligned (i1,i4,i1) has no padding voids in .descr.
+    dt = np.dtype('i1, i4, i1')
+    assert_(not dt.isalignedstruct)
+    assert_(not any(field[0] == '' for field in dt.descr))
+    dt1 = format.descr_to_dtype(dt.descr)
+    assert_equal_(dt1, dt)
+    assert_(not dt1.isalignedstruct)
+
+
+def test_descr_to_dtype_nested_aligned():
+    inner = np.dtype([('a', np.int8), ('b', np.int32)], align=True)
+    outer = np.dtype([('c', np.int32), ('d', inner)], align=True)
+    assert_(inner.isalignedstruct)
+    assert_(outer.isalignedstruct)
+    # Inner has padding voids in .descr, so its sticky flag is restored.
+    assert_(any(field[0] == '' for field in inner.descr))
+    outer1 = format.descr_to_dtype(outer.descr)
+    assert_equal_(outer1, outer)
+    assert_(outer1['d'].isalignedstruct)
+    # Outer needs no top-level padding between int32 and the nested field, so
+    # align=True leaves the same .descr as align=False and cannot be recovered.
+    assert_(not any(field[0] == '' for field in outer.descr))
+    assert_(not outer1.isalignedstruct)
+
+
+def test_descr_to_dtype_manual_c_aligned_padding_gains_flag():
+    # Explicit offsets that happen to match C alignment include padding voids in
+    # .descr.  Reconstructing then sets isalignedstruct (layout-identical).
+    dt = np.dtype({'names': ['a', 'b'], 'formats': ['i1', 'i4'],
+                   'offsets': [0, 4], 'itemsize': 8})
+    assert_(not dt.isalignedstruct)
+    assert_(any(field[0] == '' for field in dt.descr))
+    dt1 = format.descr_to_dtype(dt.descr)
+    assert_equal_(dt1, dt)
+    assert_(dt1.isalignedstruct)
+
 
 def test_version_2_0():
     f = BytesIO()
