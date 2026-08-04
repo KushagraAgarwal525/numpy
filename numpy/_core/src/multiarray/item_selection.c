@@ -248,10 +248,16 @@ PyArray_TakeFrom(PyArrayObject *self0, PyObject *indices0, int axis,
         return NULL;
     }
 
+    /*
+     * Force a base ndarray: requesting WRITEABLE without ENSUREARRAY can
+     * create a subclass instance that clears writeable again in
+     * __array_finalize__ (gh-3758).
+     */
     indices = (PyArrayObject *)PyArray_FromAny(indices0,
                 PyArray_DescrFromType(NPY_INTP),
                 0, 0,
-                NPY_ARRAY_SAME_KIND_CASTING | NPY_ARRAY_DEFAULT,
+                NPY_ARRAY_SAME_KIND_CASTING | NPY_ARRAY_DEFAULT |
+                NPY_ARRAY_ENSUREARRAY,
                 NULL);
     if (indices == NULL) {
         goto fail;
@@ -408,8 +414,9 @@ PyArray_PutTo(PyArrayObject *self, PyObject* values0, PyObject *indices0,
         return NULL;
     }
 
-    indices = (PyArrayObject *)PyArray_ContiguousFromAny(indices0,
-                                                         NPY_INTP, 0, 0);
+    /* ENSUREARRAY: see take/gh-3758 (readonly index subclasses). */
+    indices = (PyArrayObject *)PyArray_ContiguousFromObject(indices0,
+                                                            NPY_INTP, 0, 0);
     if (indices == NULL) {
         goto fail;
     }
@@ -905,7 +912,8 @@ PyArray_Repeat(PyArrayObject *aop, PyObject *op, int axis)
     NPY_cast_info cast_info;
     NPY_ARRAYMETHOD_FLAGS flags;
 
-    repeats = (PyArrayObject *)PyArray_ContiguousFromAny(op, NPY_INTP, 0, 1);
+    /* ENSUREARRAY: see take/gh-3758 (readonly repeat subclasses). */
+    repeats = (PyArrayObject *)PyArray_ContiguousFromObject(op, NPY_INTP, 0, 1);
     if (repeats == NULL) {
         return NULL;
     }

@@ -4418,6 +4418,20 @@ class TestMethods:
         a.flags.writeable = False
         assert_raises(ValueError, a.put, [1, 3, 5], [1, 3, 5])
 
+        # gh-3758: put must accept read-only ndarray subclasses as indices
+        class ImmutableNDArray(np.ndarray):
+            def __new__(cls, *args, **kwargs):
+                return np.ndarray.__new__(cls, *args, **kwargs)
+
+            def __array_finalize__(self, obj):
+                self.setflags(write=False)
+
+        a = np.zeros(6, dtype=int)
+        indices = np.array([1, 3, 5], dtype=np.intp).view(ImmutableNDArray)
+        assert not indices.flags.writeable
+        a.put(indices, [1, 3, 5])
+        assert_equal(a, [0, 1, 0, 3, 0, 5])
+
         # when calling np.put, make sure a
         # TypeError is raised if the object
         # isn't an ndarray
@@ -6372,6 +6386,27 @@ class TestTake:
         out = np.zeros(shape, dtype=x.dtype)
         ret = np.take(x, inds, out=out)
         assert ret is out
+
+    def test_readonly_subclass_indices(self):
+        # gh-3758: take must accept read-only ndarray subclasses as indices
+        class ImmutableNDArray(np.ndarray):
+            def __new__(cls, *args, **kwargs):
+                return np.ndarray.__new__(cls, *args, **kwargs)
+
+            def __array_finalize__(self, obj):
+                self.setflags(write=False)
+
+        data = np.array([1, 1, 5, 5, 4, 3])
+        for index_dtype in (np.uint16, np.intp):
+            indices = np.array([2, 3], index_dtype).view(ImmutableNDArray)
+            assert not indices.flags.writeable
+            assert_array_equal(data.take(indices), [5, 5])
+            assert_array_equal(np.take(data, indices), [5, 5])
+
+        # Plain read-only arrays already worked; keep covering them.
+        indices = np.array([2, 3], dtype=np.uint16)
+        indices.flags.writeable = False
+        assert_array_equal(data.take(indices), [5, 5])
 
 
 class TestLexsort:
@@ -8823,6 +8858,22 @@ class TestRepeat:
         A = np.repeat(m_rect, 2, axis=1)
         assert_equal(A, [[1, 1, 2, 2, 3, 3],
                          [4, 4, 5, 5, 6, 6]])
+
+    def test_readonly_subclass_repeats(self):
+        # gh-3758: repeat must accept read-only ndarray subclasses
+        class ImmutableNDArray(np.ndarray):
+            def __new__(cls, *args, **kwargs):
+                return np.ndarray.__new__(cls, *args, **kwargs)
+
+            def __array_finalize__(self, obj):
+                self.setflags(write=False)
+
+        data = np.array([1, 1, 5, 5, 4, 3])
+        for repeat_dtype in (np.uint16, np.intp):
+            repeats = np.array([2, 3], repeat_dtype).view(ImmutableNDArray)
+            assert not repeats.flags.writeable
+            assert_equal(data[:2].repeat(repeats), [1, 1, 1, 1, 1])
+            assert_equal(np.repeat(data[:2], repeats), [1, 1, 1, 1, 1])
 
 
 # TODO: test for multidimensional
