@@ -4202,6 +4202,31 @@ class TestMaskedArrayMathMethods:
         assert_equal(a.mean(), 2)
         assert_equal(a.anom(), [-1, 0, 1])
 
+    def test_divide_object(self):
+        # Regression test for gh-2814: object division must not call isfinite
+        a = masked_array([1, 2, 3], mask=[1, 0, 0], dtype=object)
+        result = a / 2
+        assert_equal(result[1:], [1, 1.5])
+        assert_(result.mask[0])
+        # Division by zero should be masked, not raise
+        b = masked_array([1, 2], dtype=object)
+        c = masked_array([1, 0], dtype=object)
+        result = b / c
+        assert_equal(result[0], 1)
+        assert_(result.mask[1])
+
+    def test_mean_object_with_mask(self):
+        # Regression test for gh-2814 / gh-3479
+        x = np.array([[2., 3.], [None, 1.]], dtype=object)
+        mx = masked_array(x, mask=np.equal(x, None))
+        assert_equal(mx.mean(axis=0), [2.0, 2.0])
+        # All-masked column must yield a masked result, not ZeroDivisionError
+        x = np.array([[None, 1, 2], [None, 4, 5], [None, 7, 8]], dtype=object)
+        mx = masked_array(x, mask=np.equal(x, None))
+        result = mx.mean(axis=0)
+        assert_(np.ma.is_masked(result[0]))
+        assert_equal(result[1:].filled(), [4.0, 5.0])
+
     def test_anom_shape(self):
         a = masked_array([1, 2, 3])
         assert_equal(a.anom().shape, a.shape)
