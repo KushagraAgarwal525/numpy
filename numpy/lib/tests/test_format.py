@@ -557,7 +557,6 @@ def test_load_padded_dtype(tmpdir, dt):
     assert_equal_(arr1.dtype.isalignedstruct, dt.isalignedstruct)
 
 
-
 @pytest.mark.filterwarnings(
     "ignore:.*align should be passed:numpy.exceptions.VisibleDeprecationWarning")
 def test_pickle_python2_python3():
