@@ -225,6 +225,17 @@ class TestNanFunctions_MinMax:
             assert_(len(w) == 1, 'no warning raised')
             assert_(issubclass(w[0].category, RuntimeWarning))
 
+    def test_object_array_mixed_with_nonfloat(self):
+        # gh-28839: NaN next to non-float objects must not compare NaN to them.
+        import datetime
+        values = np.array([np.nan, datetime.date(2020, 1, 2)], dtype=object)
+        assert_equal(np.nanmin(values), datetime.date(2020, 1, 2))
+        assert_equal(np.nanmax(values), datetime.date(2020, 1, 2))
+        # NaN after the date
+        values = np.array([datetime.date(2020, 1, 2), np.nan], dtype=object)
+        assert_equal(np.nanmin(values), datetime.date(2020, 1, 2))
+        assert_equal(np.nanmax(values), datetime.date(2020, 1, 2))
+
     @pytest.mark.parametrize("dtype", np.typecodes["AllFloat"])
     def test_initial(self, dtype):
         class MyNDArray(np.ndarray):
