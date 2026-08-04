@@ -501,13 +501,18 @@ def average(a, axis=None, weights=None, returned=False, *,
         Return the average along the specified axis. When `returned` is `True`,
         return a tuple with the average as the first element and the sum
         of the weights as the second element. `sum_of_weights` is of the
-        same type as `retval`. The result dtype follows a general pattern.
+        same type as `retval`, except for ``timedelta64`` inputs where the
+        average remains a timedelta and the weight sum is floating-point
+        (a dimensionless count cannot be represented as a timedelta).
+        The result dtype follows a general pattern.
         If `weights` is None, the result dtype will be that of `a` , or ``float64``
-        if `a` is integral. Otherwise, if `weights` is not None and `a` is non-
+        if `a` is integral (but not ``timedelta64``, which keeps its dtype).
+        Otherwise, if `weights` is not None and `a` is non-
         integral, the result type will be the type of lowest precision capable of
         representing values of both `a` and `weights`. If `a` happens to be
         integral, the previous rules still applies but the result dtype will
-        at least be ``float64``.
+        at least be ``float64``. ``timedelta64`` inputs keep a timedelta result
+        for both weighted and unweighted averages.
 
     Raises
     ------
@@ -587,22 +592,40 @@ def average(a, axis=None, weights=None, returned=False, *,
     if weights is None:
         avg = a.mean(axis, **keepdims_kw)
         avg_as_array = np.asanyarray(avg)
-        scl = avg_as_array.dtype.type(a.size / avg_as_array.size)
+        # Count of averaged elements. Timedelta dtypes cannot represent a
+        # dimensionless scale, so use float64 in that case (gh-27204).
+        count = a.size / avg_as_array.size
+        if issubclass(avg_as_array.dtype.type, np.timedelta64):
+            scl = np.float64(count)
+        else:
+            scl = avg_as_array.dtype.type(count)
     else:
         wgt = _weights_are_valid(weights=weights, a=a, axis=axis)
 
-        if issubclass(a.dtype.type, (np.integer, np.bool)):
-            result_dtype = np.result_type(a.dtype, wgt.dtype, 'f8')
+        # Timedelta is an integer subclass but does not promote with floats
+        # via result_type. Multiply still supports timedelta * float and
+        # preserves NaT, so use that path and keep the weight sum floating.
+        if issubclass(a.dtype.type, np.timedelta64):
+            result_dtype = np.result_type(wgt.dtype, 'f8')
+            scl = wgt.sum(axis=axis, dtype=result_dtype, **keepdims_kw)
+            if np.any(scl == 0.0):
+                raise ZeroDivisionError(
+                    "Weights sum to zero, can't be normalized")
+            avg = avg_as_array = (
+                np.multiply(a, wgt).sum(axis, **keepdims_kw) / scl)
         else:
-            result_dtype = np.result_type(a.dtype, wgt.dtype)
+            if issubclass(a.dtype.type, (np.integer, np.bool)):
+                result_dtype = np.result_type(a.dtype, wgt.dtype, 'f8')
+            else:
+                result_dtype = np.result_type(a.dtype, wgt.dtype)
 
-        scl = wgt.sum(axis=axis, dtype=result_dtype, **keepdims_kw)
-        if np.any(scl == 0.0):
-            raise ZeroDivisionError(
-                "Weights sum to zero, can't be normalized")
+            scl = wgt.sum(axis=axis, dtype=result_dtype, **keepdims_kw)
+            if np.any(scl == 0.0):
+                raise ZeroDivisionError(
+                    "Weights sum to zero, can't be normalized")
 
-        avg = avg_as_array = np.multiply(a, wgt,
-                          dtype=result_dtype).sum(axis, **keepdims_kw) / scl
+            avg = avg_as_array = np.multiply(a, wgt,
+                              dtype=result_dtype).sum(axis, **keepdims_kw) / scl
 
     if returned:
         if scl.shape != avg_as_array.shape:

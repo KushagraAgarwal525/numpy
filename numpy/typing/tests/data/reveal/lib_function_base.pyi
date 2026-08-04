@@ -94,6 +94,13 @@ assert_type(np.average(AR_O, keepdims=True), np.ndarray)
 assert_type(np.average(AR_O, returned=True), tuple[Any, Any])
 assert_type(np.average(AR_O, axis=1, returned=True), tuple[np.ndarray, np.ndarray])
 assert_type(np.average(AR_O, keepdims=True, returned=True), tuple[np.ndarray, np.ndarray])
+assert_type(np.average(AR_m), np.timedelta64)
+assert_type(np.average(AR_m, axis=0), npt.NDArray[np.timedelta64])
+assert_type(np.average(AR_m, keepdims=True), npt.NDArray[np.timedelta64])
+assert_type(np.average(AR_m, returned=True), tuple[np.timedelta64, np.floating])
+assert_type(np.average(AR_m, axis=0, returned=True),
+            tuple[npt.NDArray[np.timedelta64], npt.NDArray[np.floating]])
+assert_type(np.average(AR_m, weights=AR_f8), np.timedelta64)
 
 # asarray_chkfinite
 assert_type(np.asarray_chkfinite(AR_f8_1d), np.ndarray[tuple[int], np.dtype[np.float64]])

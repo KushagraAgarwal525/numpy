@@ -1,0 +1,7 @@
+``np.average`` supports ``timedelta64``
+---------------------------------------
+`numpy.average` now works on ``timedelta64`` arrays. Unweighted averages match
+`numpy.mean`, and weighted averages use ``timedelta * float`` arithmetic so
+``NaT`` continues to propagate. When ``returned=True``, the weight sum is
+returned as a floating-point value because a dimensionless count cannot be
+represented as a timedelta.
