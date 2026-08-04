@@ -221,6 +221,7 @@ def average[ArrayT: NDArray[np.inexact]](
     returned: L[False] = False,
     *,
     keepdims: L[True],
+    where: _ArrayLikeBool_co | bool = True,
 ) -> ArrayT: ...
 @overload  # inexact array, returned=True keepdims=True
 def average[ArrayT: NDArray[np.inexact]](
@@ -230,6 +231,7 @@ def average[ArrayT: NDArray[np.inexact]](
     *,
     returned: L[True],
     keepdims: L[True],
+    where: _ArrayLikeBool_co | bool = True,
 ) -> _Tuple2[ArrayT]: ...
 @overload  # inexact array-like, axis=None
 def average[ScalarT: np.inexact](
@@ -239,6 +241,7 @@ def average[ScalarT: np.inexact](
     returned: L[False] = False,
     *,
     keepdims: L[False] | _NoValueType = ...,
+    where: _ArrayLikeBool_co | bool = True,
 ) -> ScalarT: ...
 @overload  # inexact array-like, axis=<given>
 def average[ScalarT: np.inexact](
@@ -248,6 +251,7 @@ def average[ScalarT: np.inexact](
     returned: L[False] = False,
     *,
     keepdims: L[False] | _NoValueType = ...,
+    where: _ArrayLikeBool_co | bool = True,
 ) -> NDArray[ScalarT]: ...
 @overload  # inexact array-like, keepdims=True
 def average[ScalarT: np.inexact](
@@ -257,6 +261,7 @@ def average[ScalarT: np.inexact](
     returned: L[False] = False,
     *,
     keepdims: L[True],
+    where: _ArrayLikeBool_co | bool = True,
 ) -> NDArray[ScalarT]: ...
 @overload  # inexact array-like, axis=None, returned=True
 def average[ScalarT: np.inexact](
@@ -266,6 +271,7 @@ def average[ScalarT: np.inexact](
     *,
     returned: L[True],
     keepdims: L[False] | _NoValueType = ...,
+    where: _ArrayLikeBool_co | bool = True,
 ) -> _Tuple2[ScalarT]: ...
 @overload  # inexact array-like, axis=<given>, returned=True
 def average[ScalarT: np.inexact](
@@ -275,6 +281,7 @@ def average[ScalarT: np.inexact](
     *,
     returned: L[True],
     keepdims: L[False] | _NoValueType = ...,
+    where: _ArrayLikeBool_co | bool = True,
 ) -> _Tuple2[NDArray[ScalarT]]: ...
 @overload  # inexact array-like, returned=True, keepdims=True
 def average[ScalarT: np.inexact](
@@ -284,6 +291,7 @@ def average[ScalarT: np.inexact](
     *,
     returned: L[True],
     keepdims: L[True],
+    where: _ArrayLikeBool_co | bool = True,
 ) -> _Tuple2[NDArray[ScalarT]]: ...
 @overload  # bool or integer array-like, axis=None
 def average(
@@ -293,6 +301,7 @@ def average(
     returned: L[False] = False,
     *,
     keepdims: L[False] | _NoValueType = ...,
+    where: _ArrayLikeBool_co | bool = True,
 ) -> np.float64: ...
 @overload  # bool or integer array-like, axis=<given>
 def average(
@@ -302,6 +311,7 @@ def average(
     returned: L[False] = False,
     *,
     keepdims: L[False] | _NoValueType = ...,
+    where: _ArrayLikeBool_co | bool = True,
 ) -> NDArray[np.float64]: ...
 @overload  # bool or integer array-like, keepdims=True
 def average(
@@ -311,6 +321,7 @@ def average(
     returned: L[False] = False,
     *,
     keepdims: L[True],
+    where: _ArrayLikeBool_co | bool = True,
 ) -> NDArray[np.float64]: ...
 @overload  # bool or integer array-like, axis=None, returned=True
 def average(
@@ -320,6 +331,7 @@ def average(
     *,
     returned: L[True],
     keepdims: L[False] | _NoValueType = ...,
+    where: _ArrayLikeBool_co | bool = True,
 ) -> _Tuple2[np.float64]: ...
 @overload  # bool or integer array-like, axis=<given>, returned=True
 def average(
@@ -329,6 +341,7 @@ def average(
     *,
     returned: L[True],
     keepdims: L[False] | _NoValueType = ...,
+    where: _ArrayLikeBool_co | bool = True,
 ) -> _Tuple2[NDArray[np.float64]]: ...
 @overload  # bool or integer array-like, returned=True, keepdims=True
 def average(
@@ -338,6 +351,7 @@ def average(
     *,
     returned: L[True],
     keepdims: L[True],
+    where: _ArrayLikeBool_co | bool = True,
 ) -> _Tuple2[NDArray[np.float64]]: ...
 @overload  # complex array-like, axis=None
 def average(
@@ -347,6 +361,7 @@ def average(
     returned: L[False] = False,
     *,
     keepdims: L[False] | _NoValueType = ...,
+    where: _ArrayLikeBool_co | bool = True,
 ) -> np.complex128: ...
 @overload  # complex array-like, axis=<given>
 def average(
@@ -356,6 +371,7 @@ def average(
     returned: L[False] = False,
     *,
     keepdims: L[False] | _NoValueType = ...,
+    where: _ArrayLikeBool_co | bool = True,
 ) -> NDArray[np.complex128]: ...
 @overload  # complex array-like, keepdims=True
 def average(
@@ -365,6 +381,7 @@ def average(
     returned: L[False] = False,
     *,
     keepdims: L[True],
+    where: _ArrayLikeBool_co | bool = True,
 ) -> NDArray[np.complex128]: ...
 @overload  # complex array-like, axis=None, returned=True
 def average(
@@ -374,6 +391,7 @@ def average(
     *,
     returned: L[True],
     keepdims: L[False] | _NoValueType = ...,
+    where: _ArrayLikeBool_co | bool = True,
 ) -> _Tuple2[np.complex128]: ...
 @overload  # complex array-like, axis=<given>, returned=True
 def average(
@@ -383,6 +401,7 @@ def average(
     *,
     returned: L[True],
     keepdims: L[False] | _NoValueType = ...,
+    where: _ArrayLikeBool_co | bool = True,
 ) -> _Tuple2[NDArray[np.complex128]]: ...
 @overload  # complex array-like, keepdims=True, returned=True
 def average(
@@ -392,6 +411,7 @@ def average(
     *,
     returned: L[True],
     keepdims: L[True],
+    where: _ArrayLikeBool_co | bool = True,
 ) -> _Tuple2[NDArray[np.complex128]]: ...
 @overload  # unknown, axis=None
 def average(
@@ -401,6 +421,7 @@ def average(
     returned: L[False] = False,
     *,
     keepdims: L[False] | _NoValueType = ...,
+    where: _ArrayLikeBool_co | bool = True,
 ) -> Any: ...
 @overload  # unknown, axis=<given>
 def average(
@@ -410,6 +431,7 @@ def average(
     returned: L[False] = False,
     *,
     keepdims: L[False] | _NoValueType = ...,
+    where: _ArrayLikeBool_co | bool = True,
 ) -> np.ndarray: ...
 @overload  # unknown, keepdims=True
 def average(
@@ -419,6 +441,7 @@ def average(
     returned: L[False] = False,
     *,
     keepdims: L[True],
+    where: _ArrayLikeBool_co | bool = True,
 ) -> np.ndarray: ...
 @overload  # unknown, axis=None, returned=True
 def average(
@@ -428,6 +451,7 @@ def average(
     *,
     returned: L[True],
     keepdims: L[False] | _NoValueType = ...,
+    where: _ArrayLikeBool_co | bool = True,
 ) -> _Tuple2[Any]: ...
 @overload  # unknown, axis=<given>, returned=True
 def average(
@@ -437,6 +461,7 @@ def average(
     *,
     returned: L[True],
     keepdims: L[False] | _NoValueType = ...,
+    where: _ArrayLikeBool_co | bool = True,
 ) -> _Tuple2[np.ndarray]: ...
 @overload  # unknown, returned=True, keepdims=True
 def average(
@@ -446,6 +471,7 @@ def average(
     *,
     returned: L[True],
     keepdims: L[True],
+    where: _ArrayLikeBool_co | bool = True,
 ) -> _Tuple2[np.ndarray]: ...
 
 #

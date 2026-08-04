@@ -444,13 +444,13 @@ def _weights_are_valid(weights, a, axis):
 
 
 def _average_dispatcher(a, axis=None, weights=None, returned=None, *,
-                        keepdims=None):
+                        keepdims=None, where=None):
     return (a, weights)
 
 
 @array_function_dispatch(_average_dispatcher)
 def average(a, axis=None, weights=None, returned=False, *,
-            keepdims=np._NoValue):
+            keepdims=np._NoValue, where=True):
     """
     Compute the weighted average along the specified axis.
 
@@ -481,6 +481,11 @@ def average(a, axis=None, weights=None, returned=False, *,
         where the sum is over all included elements.
         The only constraint on the values of `weights` is that `sum(weights)`
         must not be 0.
+
+        Exact zero weights are treated as omitting the corresponding values
+        from the weighted product, so a zero weight can be used to ignore
+        non-finite entries without producing ``0 * inf`` / ``0 * nan``
+        results (see Notes).
     returned : bool, optional
         Default is `False`. If `True`, the tuple (`average`, `sum_of_weights`)
         is returned, otherwise only the average is returned.
@@ -494,6 +499,14 @@ def average(a, axis=None, weights=None, returned=False, *,
         or other classes whose methods do not support `keepdims`.
 
         .. versionadded:: 1.23.0
+
+    where : array_like of bool, optional
+        Elements to include in the average. If an element of `where` is False,
+        it is treated as if it were not present. When `weights` is given, False
+        entries are also excluded from the weight sum. `where` must broadcast
+        to the shape of `a`.
+
+        .. versionadded:: 2.6.0
 
     Returns
     -------
@@ -512,8 +525,9 @@ def average(a, axis=None, weights=None, returned=False, *,
     Raises
     ------
     ZeroDivisionError
-        When all weights along axis are zero. See `numpy.ma.average` for a
-        version robust to this type of error.
+        When all weights along axis are zero, or when `where` excludes every
+        element. See `numpy.ma.average` for a version robust to this type of
+        error.
     TypeError
         When `weights` does not have the same shape as `a`, and `axis=None`.
     ValueError
@@ -528,6 +542,14 @@ def average(a, axis=None, weights=None, returned=False, *,
                  "missing" values
     numpy.result_type : Returns the type that results from applying the
                         numpy type promotion rules to the arguments.
+
+    Notes
+    -----
+    IEEE floating-point arithmetic defines ``0.0 * inf`` and ``0.0 * nan`` as
+    ``nan``.  Without special handling that would make a zero weight ineffective
+    for omitting non-finite values.  ``average`` therefore evaluates the
+    weighted product only where the weight is nonzero (and, if given, where
+    `where` is True), so a zero weight omits the corresponding value.
 
     Examples
     --------
@@ -572,6 +594,19 @@ def average(a, axis=None, weights=None, returned=False, *,
         ...
     ValueError: Shape of weights must be consistent
     with shape of a along specified axis.
+
+    Zero weights omit the corresponding values, including non-finite ones:
+
+    >>> np.average([np.inf, 1.0], weights=[0.0, 1.0])
+    1.0
+
+    Use `where` to exclude values explicitly (for example to ignore zero
+    weights without relying on the automatic omission above):
+
+    >>> x = np.array([np.inf, 1.0, 2.0])
+    >>> w = np.array([0.0, 1.0, 1.0])
+    >>> np.average(x, weights=w, where=(w != 0))
+    1.5
     """
     a = np.asanyarray(a)
 
@@ -584,10 +619,26 @@ def average(a, axis=None, weights=None, returned=False, *,
     else:
         keepdims_kw = {'keepdims': keepdims}
 
+    # Treat where=True as the ufunc default (no mask).  Anything else is an
+    # array-like boolean mask that must broadcast with `a`.
+    where_is_default = where is True
+    if not where_is_default:
+        where = np.asanyarray(where)
+
     if weights is None:
-        avg = a.mean(axis, **keepdims_kw)
-        avg_as_array = np.asanyarray(avg)
-        scl = avg_as_array.dtype.type(a.size / avg_as_array.size)
+        if where_is_default:
+            avg = a.mean(axis, **keepdims_kw)
+            avg_as_array = np.asanyarray(avg)
+            scl = avg_as_array.dtype.type(a.size / avg_as_array.size)
+        else:
+            avg = a.mean(axis, where=where, **keepdims_kw)
+            avg_as_array = np.asanyarray(avg)
+            # Number of included elements, matching mean's reduction.
+            scl = np.ones(a.shape, dtype=avg_as_array.dtype).sum(
+                axis=axis, where=where, **keepdims_kw)
+            if np.any(scl == 0):
+                raise ZeroDivisionError(
+                    "No elements included in average (where masks all values)")
     else:
         wgt = _weights_are_valid(weights=weights, a=a, axis=axis)
 
@@ -596,13 +647,32 @@ def average(a, axis=None, weights=None, returned=False, *,
         else:
             result_dtype = np.result_type(a.dtype, wgt.dtype)
 
-        scl = wgt.sum(axis=axis, dtype=result_dtype, **keepdims_kw)
+        # Exclude exact-zero weights from the product so that a weight of 0
+        # omits non-finite values instead of producing 0*inf / 0*nan -> nan.
+        # Finite values are unchanged because x*0 == 0 already.
+        nonzero_wgt = (wgt != 0)
+        if where_is_default:
+            mul_where = nonzero_wgt
+            sum_where = True
+        else:
+            mul_where = np.logical_and(where, nonzero_wgt)
+            sum_where = where
+
+        scl = wgt.sum(axis=axis, dtype=result_dtype, where=sum_where,
+                      **keepdims_kw)
         if np.any(scl == 0.0):
             raise ZeroDivisionError(
                 "Weights sum to zero, can't be normalized")
 
-        avg = avg_as_array = np.multiply(a, wgt,
-                          dtype=result_dtype).sum(axis, **keepdims_kw) / scl
+        # Accumulate a*wgt only where the contribution is included; elsewhere
+        # leave zeros so 0*inf / 0*nan never materializes.
+        prod = np.zeros(np.broadcast_shapes(a.shape, wgt.shape),
+                        dtype=result_dtype)
+        if type(a) is not np.ndarray:
+            # Preserve ndarray subclasses (see test_subclasses).
+            prod = prod.view(type(a))
+        np.multiply(a, wgt, out=prod, where=mul_where)
+        avg = avg_as_array = prod.sum(axis, **keepdims_kw) / scl
 
     if returned:
         if scl.shape != avg_as_array.shape:
