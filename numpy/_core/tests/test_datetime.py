@@ -1816,6 +1816,92 @@ class TestDateTime:
         with assert_raises_regex(TypeError, "common metadata divisor"):
             val1 // val2
 
+    @pytest.mark.parametrize("op1, op2, floored, truncated", [
+        # mq: timedelta // int must floor toward -inf (gh-17831); / truncates
+        (np.timedelta64(-10, 's'), np.int64(3),
+         np.timedelta64(-4, 's'), np.timedelta64(-3, 's')),
+        (np.timedelta64(10, 's'), np.int64(-3),
+         np.timedelta64(-4, 's'), np.timedelta64(-3, 's')),
+        (np.timedelta64(-10, 's'), np.int64(-3),
+         np.timedelta64(3, 's'), np.timedelta64(3, 's')),
+        (np.timedelta64(7, 's'), np.int64(4),
+         np.timedelta64(1, 's'), np.timedelta64(1, 's')),
+        (np.array([-10, 10, -7], dtype='m8[s]'), np.int64(3),
+         np.array([-4, 3, -3], dtype='m8[s]'),
+         np.array([-3, 3, -2], dtype='m8[s]')),
+        # md: timedelta // float also floors; / truncates toward zero
+        (np.timedelta64(-10, 's'), 3.0,
+         np.timedelta64(-4, 's'), np.timedelta64(-3, 's')),
+        (np.timedelta64(10, 's'), -2.5,
+         np.timedelta64(-4, 's'), np.timedelta64(-4, 's')),
+        ])
+    def test_timedelta_int_float_floor_vs_true_divide(
+            self, op1, op2, floored, truncated):
+        assert_equal(op1 // op2, floored)
+        assert_equal(op1 / op2, truncated)
+
+    @pytest.mark.skipif(IS_WASM, reason="fp errors don't work in wasm")
+    @pytest.mark.parametrize("dividend, divisor, op", [
+        # NaT dividend must not warn on // or / by zero (gh-17831)
+        (np.timedelta64('NaT', 's'), np.int64(0), 'floordiv'),
+        (np.timedelta64('NaT', 's'), np.int64(0), 'truediv'),
+        (np.array([np.timedelta64('NaT', 's')]), np.int64(0), 'floordiv'),
+        (np.array([np.timedelta64('NaT', 's')]), 0.0, 'floordiv'),
+        (np.array([np.timedelta64('NaT', 's')]), 0.0, 'truediv'),
+        ])
+    def test_timedelta_nat_div_by_zero_no_warning(
+            self, dividend, divisor, op):
+        with warnings.catch_warnings(record=True) as w:
+            warnings.simplefilter('always')
+            with np.errstate(all='warn'):
+                if op == 'floordiv':
+                    result = dividend // divisor
+                else:
+                    result = dividend / divisor
+        runtime = [x for x in w if issubclass(x.category, RuntimeWarning)]
+        assert len(runtime) == 0
+        assert_equal(result, np.timedelta64('NaT', 's'))
+
+    @pytest.mark.skipif(IS_WASM, reason="fp errors don't work in wasm")
+    @pytest.mark.parametrize("dividend, divisor, op", [
+        (np.timedelta64(10, 's'), np.int64(0), 'floordiv'),
+        (np.timedelta64(10, 's'), np.int64(0), 'truediv'),
+        (np.array([np.timedelta64(10, 's'), np.timedelta64(5, 's')]),
+         np.int64(0), 'floordiv'),
+        (np.array([np.timedelta64('NaT', 's'), np.timedelta64(10, 's')]),
+         np.int64(0), 'floordiv'),
+        (np.timedelta64(10, 's'), 0.0, 'floordiv'),
+        (np.timedelta64(10, 's'), 0.0, 'truediv'),
+        ])
+    def test_timedelta_nonzero_div_by_zero_warns(
+            self, dividend, divisor, op):
+        with pytest.warns(RuntimeWarning, match="divide by zero"):
+            with np.errstate(all='warn'):
+                if op == 'floordiv':
+                    result = dividend // divisor
+                else:
+                    result = dividend / divisor
+        assert_equal(np.asarray(result).astype('m8[s]'),
+                     np.timedelta64('NaT', 's'))
+
+    @pytest.mark.skipif(IS_WASM, reason="fp errors don't work in wasm")
+    def test_timedelta_timedelta_div_by_zero_warn_kinds(self):
+        # NaT // 0 -> invalid (NaT), not divide-by-zero
+        with warnings.catch_warnings(record=True) as w:
+            warnings.simplefilter('always')
+            with np.errstate(all='warn'):
+                r = np.timedelta64('NaT', 's') // np.timedelta64(0, 's')
+        assert_equal(r, 0)
+        msgs = [str(x.message) for x in w
+                if issubclass(x.category, RuntimeWarning)]
+        assert any('invalid' in m for m in msgs)
+        assert not any('divide by zero' in m for m in msgs)
+
+        with pytest.warns(RuntimeWarning, match="divide by zero"):
+            with np.errstate(all='warn'):
+                r = np.timedelta64(10, 's') // np.timedelta64(0, 's')
+        assert_equal(r, 0)
+
     @pytest.mark.parametrize("op1, op2", [
         # reuse the test cases from floordiv
         (np.timedelta64(7, 's'),
