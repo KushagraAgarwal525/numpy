@@ -1,0 +1,8 @@
+``np.arange`` with complex arguments
+------------------------------------
+``np.arange`` with complex ``start``/``stop``/``step`` previously computed the
+output length as ``min(ceil(real), ceil(imag))`` of ``(stop - start) / step``.
+When the imaginary part was zero — the only well-defined case, where ``stop``
+lies on the line ``start + t*step`` — this always produced an empty array.
+Length is now based on the real part of that quotient, and a ``ValueError`` is
+raised when the imaginary part is nonzero.

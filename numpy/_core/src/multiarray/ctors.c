@@ -3180,7 +3180,7 @@ PyArray_Arange(double start, double stop, double step, int type_num)
 static npy_intp
 _calc_length(PyObject *start, PyObject *stop, PyObject *step, PyObject **next, int cmplx)
 {
-    npy_intp len, tmp;
+    npy_intp len;
     PyObject *zero, *val;
     int next_is_nonzero, val_is_zero;
     double value;
@@ -3226,27 +3226,76 @@ _calc_length(PyObject *start, PyObject *stop, PyObject *step, PyObject **next, i
         return -1;
     }
 
-    if (cmplx && PyComplex_Check(val)) {
-        value = PyComplex_RealAsDouble(val);
-        if (error_converting(value)) {
-            Py_DECREF(val);
-            return -1;
+    if (cmplx) {
+        /*
+         * Complex arange length is only well-defined when
+         * (stop - start) / step is real-valued, i.e. stop lies on the
+         * line start + t*step.  Historically length was computed as
+         * min(ceil(real), ceil(imag)), which is always 0 when imag == 0
+         * — the common, well-defined case (gh-10332).
+         */
+        double imag = 0.0;
+
+        if (PyComplex_Check(val)) {
+            value = PyComplex_RealAsDouble(val);
+            if (error_converting(value)) {
+                Py_DECREF(val);
+                return -1;
+            }
+            imag = PyComplex_ImagAsDouble(val);
+            if (error_converting(imag)) {
+                Py_DECREF(val);
+                return -1;
+            }
         }
-        len = _arange_safe_ceil_to_intp(value);
-        if (error_converting(len)) {
-            Py_DECREF(val);
-            return -1;
+        else {
+            /*
+             * NumPy complex scalars are not PyComplex_Check.  Prefer
+             * .real/.imag when present; otherwise treat as real.
+             */
+            PyObject *real_obj = PyObject_GetAttrString(val, "real");
+            PyObject *imag_obj;
+
+            if (real_obj == NULL) {
+                PyErr_Clear();
+                value = PyFloat_AsDouble(val);
+                if (error_converting(value)) {
+                    Py_DECREF(val);
+                    return -1;
+                }
+            }
+            else {
+                imag_obj = PyObject_GetAttrString(val, "imag");
+                if (imag_obj == NULL) {
+                    Py_DECREF(real_obj);
+                    Py_DECREF(val);
+                    return -1;
+                }
+                value = PyFloat_AsDouble(real_obj);
+                Py_DECREF(real_obj);
+                if (error_converting(value)) {
+                    Py_DECREF(imag_obj);
+                    Py_DECREF(val);
+                    return -1;
+                }
+                imag = PyFloat_AsDouble(imag_obj);
+                Py_DECREF(imag_obj);
+                if (error_converting(imag)) {
+                    Py_DECREF(val);
+                    return -1;
+                }
+            }
         }
-        value = PyComplex_ImagAsDouble(val);
         Py_DECREF(val);
-        if (error_converting(value)) {
+
+        /* -0.0 compares equal to 0.0; NaN does not and must error. */
+        if (imag != 0.0) {
+            PyErr_SetString(PyExc_ValueError,
+                    "arange: (stop - start) / step must be real-valued "
+                    "for complex arguments (stop must lie on the line "
+                    "start + t*step)");
             return -1;
         }
-        tmp = _arange_safe_ceil_to_intp(value);
-        if (error_converting(tmp)) {
-            return -1;
-        }
-        len = PyArray_MIN(len, tmp);
     }
     else {
         value = PyFloat_AsDouble(val);
@@ -3254,21 +3303,21 @@ _calc_length(PyObject *start, PyObject *stop, PyObject *step, PyObject **next, i
         if (error_converting(value)) {
             return -1;
         }
+    }
 
-        /* Underflow and divide-by-inf check */
-        if (val_is_zero && next_is_nonzero) {
-            if (npy_signbit(value)) {
-                len = 0;
-            }
-            else {
-                len = 1;
-            }
+    /* Underflow and divide-by-inf check */
+    if (val_is_zero && next_is_nonzero) {
+        if (npy_signbit(value)) {
+            len = 0;
         }
         else {
-            len = _arange_safe_ceil_to_intp(value);
-            if (error_converting(len)) {
-                return -1;
-            }
+            len = 1;
+        }
+    }
+    else {
+        len = _arange_safe_ceil_to_intp(value);
+        if (error_converting(len)) {
+            return -1;
         }
     }
 
