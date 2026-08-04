@@ -1,5 +1,5 @@
-import contextlib
 import collections
+import contextlib
 import ctypes
 import inspect
 import operator
