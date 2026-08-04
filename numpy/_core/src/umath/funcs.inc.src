@@ -173,6 +173,13 @@ npy_ObjectTrunc(PyObject *obj) {
 }
 
 static PyObject *
+npy_ObjectRint(PyObject *obj) {
+    /* Prefer the Python round protocol (__round__) over a .rint method. */
+    return PyObject_CallFunction(npy_static_pydata.builtins_round_func,
+                                 "O", obj);
+}
+
+static PyObject *
 npy_ObjectGCD(PyObject *i1, PyObject *i2)
 {
     PyObject *gcd = NULL;

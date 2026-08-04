@@ -138,6 +138,9 @@ initialize_static_globals(void)
     IMPORT_GLOBAL("math", "gcd",
                   npy_static_pydata.math_gcd_func);
 
+    IMPORT_GLOBAL("builtins", "round",
+                  npy_static_pydata.builtins_round_func);
+
     IMPORT_GLOBAL("numpy.exceptions", "AxisError",
                   npy_static_pydata.AxisError);
 

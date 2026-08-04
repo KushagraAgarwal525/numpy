@@ -4400,10 +4400,19 @@ class TestRoundingFunctions:
             def __trunc__(self):
                 return 3
 
+            def __round__(self, ndigits=None):
+                if ndigits is None:
+                    return 4
+                return 10 + ndigits
+
         arr = np.array([C(), C()])
         assert_equal(np.floor(arr), [1, 1])
         assert_equal(np.ceil(arr),  [2, 2])
         assert_equal(np.trunc(arr), [3, 3])
+        assert_equal(np.rint(arr), [4, 4])
+        assert_equal(np.round(arr), [4, 4])
+        assert_equal(np.round(arr, decimals=2), [12, 12])
+        assert_equal(np.round(arr, decimals=-1), [9, 9])
 
     def test_object_indirect(self):
         """ test implementations via __float__ """
@@ -4416,12 +4425,50 @@ class TestRoundingFunctions:
         assert_equal(np.ceil(arr),  [-2, -2])
         with pytest.raises(TypeError):
             np.trunc(arr)  # consistent with math.trunc
+        # round() accepts __float__ via the numeric protocol
+        assert_equal(np.rint(arr), [-2, -2])
+        assert_equal(np.round(arr), [-2, -2])
+
+    def test_object_round_out(self):
+        class C:
+            def __round__(self, ndigits=None):
+                return 0 if ndigits is None else ndigits
+
+        arr = np.array([C(), C()], dtype=object)
+        out0 = np.empty(2, dtype=object)
+        out2 = np.empty(2, dtype=object)
+        assert_equal(np.rint(arr, out=out0), [0, 0])
+        assert_equal(out0, [0, 0])
+        assert_equal(np.round(arr, decimals=3, out=out2), [3, 3])
+        assert_equal(out2, [3, 3])
+
+    def test_object_python_numeric(self):
+        """Object arrays of built-in / stdlib numeric types use __round__."""
+        from decimal import Decimal
+        from fractions import Fraction
+
+        floats = np.array([1.5, 2.5, 3.5], dtype=object)
+        assert_equal(np.rint(floats), [2, 2, 4])
+        assert_equal(np.round(floats), [2, 2, 4])
+        assert_equal(np.round(floats, decimals=0), [2, 2, 4])
+        assert_equal(np.round(floats, decimals=1), [1.5, 2.5, 3.5])
+
+        decs = np.array([Decimal('1.55'), Decimal('2.5')], dtype=object)
+        assert_equal(np.rint(decs), [2, 2])
+        assert_equal(np.round(decs, decimals=1),
+                     [Decimal('1.6'), Decimal('2.5')])
+
+        fracs = np.array([Fraction(3, 2), Fraction(5, 2)], dtype=object)
+        assert_equal(np.rint(fracs), [2, 2])
+        assert_equal(np.round(fracs), [2, 2])
 
     def test_fraction(self):
         f = Fraction(-4, 3)
         assert_equal(np.floor(f), -2)
         assert_equal(np.ceil(f), -1)
         assert_equal(np.trunc(f), -1)
+        assert_equal(np.rint(f), -1)
+        assert_equal(np.round(f), -1)
 
     @pytest.mark.parametrize('func', [np.floor, np.ceil, np.trunc])
     @pytest.mark.parametrize('dtype', [np.bool, np.float64, np.float32,
@@ -4429,6 +4476,13 @@ class TestRoundingFunctions:
     def test_output_dtype(self, func, dtype):
         arr = np.array([-2, 0, 4, 8]).astype(dtype)
         result = func(arr)
+        assert_equal(arr, result)
+        assert result.dtype == dtype
+
+    @pytest.mark.parametrize('dtype', [np.float64, np.float32])
+    def test_rint_output_dtype(self, dtype):
+        arr = np.array([-2, 0, 4, 8]).astype(dtype)
+        result = np.rint(arr)
         assert_equal(arr, result)
         assert result.dtype == dtype
 

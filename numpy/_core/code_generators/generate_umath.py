@@ -1025,7 +1025,7 @@ defdict = {
           TD('e', f='rint', astype={'e': 'f'}),
           TD(inexactvec, dispatch=[('loops_unary_fp', 'fd')]),
           TD('fdg' + cmplx, f='rint'),
-          TD(P, f='rint'),
+          TD(O, f='npy_ObjectRint'),
           ),
 'arctan2':
     Ufunc(2, 1, None,
