@@ -4425,9 +4425,12 @@ class TestRoundingFunctions:
         assert_equal(np.ceil(arr),  [-2, -2])
         with pytest.raises(TypeError):
             np.trunc(arr)  # consistent with math.trunc
-        # round() accepts __float__ via the numeric protocol
-        assert_equal(np.rint(arr), [-2, -2])
-        assert_equal(np.round(arr), [-2, -2])
+        # builtins.round requires __round__; unlike math.floor it does not
+        # fall back through __float__.
+        with pytest.raises(TypeError):
+            np.rint(arr)
+        with pytest.raises(TypeError):
+            np.round(arr)
 
     def test_object_round_out(self):
         class C:
