@@ -361,6 +361,13 @@ array_converter_result_type(PyArrayArrayConverterObject *self,
         ndescrs++;
     }
 
+    if (nDTypes == 0) {
+        /* Empty converter with no extra_dtype (gh-28829) */
+        PyErr_SetString(PyExc_ValueError,
+                "at least one array or dtype is required");
+        goto finish;
+    }
+
     PyArray_DTypeMeta *common_dtype = PyArray_PromoteDTypeSequence(
             nDTypes, DTypes);
     if (common_dtype == NULL) {

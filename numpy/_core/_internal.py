@@ -57,10 +57,10 @@ def _makenames_list(adict, align):
 #  a dictionary without "names" and "formats"
 #  fields is used as a data-type descriptor.
 def _usefields(adict, align):
-    try:
-        names = adict[-1]
-    except KeyError:
-        names = None
+    # Require real key presence: Counter/defaultdict return a default for
+    # missing keys (e.g. 0), which must not be treated as a names list
+    # (gh-28829).
+    names = adict[-1] if (-1 in adict) else None
     if names is None:
         names, formats, offsets, titles = _makenames_list(adict, align)
     else:

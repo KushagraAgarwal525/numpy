@@ -1,0 +1,10 @@
+``dtype`` construction with ``Counter``/``defaultdict`` and empty ``_array_converter.result_type``
+-------------------------------------------------------------------------------------------------
+
+Constructing a structured :class:`numpy.dtype` from mappings that return a
+default for missing keys (such as :class:`collections.Counter` and
+:class:`collections.defaultdict`) no longer mistakes those defaults for
+``names``/``formats`` entries. Related calls such as :func:`numpy.promote_types`
+now fail cleanly instead of leaving an exception set (which could abort in
+debug builds). Calling ``result_type()`` on an empty internal
+``_array_converter`` now raises ``ValueError`` instead of aborting.

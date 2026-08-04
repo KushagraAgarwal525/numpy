@@ -1066,59 +1066,149 @@ _convert_from_field_dict(PyObject *obj, int align)
 }
 
 /*
+ * True key presence for dtype mapping descriptors.
+ *
+ * Counter/defaultdict implement missing-key GetItem by returning a default
+ * (e.g. 0), so PyMapping_HasKeyString/GetItemString cannot detect absence.
+ * Use dict containment (or the keys view) instead (gh-28829).
+ */
+static int
+_mapping_has_real_key(PyObject *obj, const char *key)
+{
+    PyObject *key_obj = PyUnicode_FromString(key);
+    if (key_obj == NULL) {
+        return -1;
+    }
+    int ret;
+    if (PyDict_Check(obj)) {
+        ret = PyDict_Contains(obj, key_obj);
+        Py_DECREF(key_obj);
+        return ret;
+    }
+    PyObject *keys = PyMapping_Keys(obj);
+    if (keys == NULL) {
+        Py_DECREF(key_obj);
+        return -1;
+    }
+    ret = PySequence_Contains(keys, key_obj);
+    Py_DECREF(keys);
+    Py_DECREF(key_obj);
+    return ret;
+}
+
+
+/*
+ * Get a mapping item only when the key is really present.
+ */
+static PyObject *
+_mapping_get_item_if_present(PyObject *obj, const char *key)
+{
+    int has_key = _mapping_has_real_key(obj, key);
+    if (has_key < 0) {
+        return NULL;
+    }
+    if (!has_key) {
+        return NULL;
+    }
+    return PyMapping_GetItemString(obj, key);
+}
+
+
+/*
  * Creates a struct dtype object from a Python dictionary.
  */
 static PyArray_Descr *
 _convert_from_dict(PyObject *obj, int align)
 {
-    PyObject *fields = PyDict_New();
+    PyObject *fields = NULL;
+    PyObject *names = NULL;
+    PyObject *descrs = NULL;
+    PyObject *offsets = NULL;
+    PyObject *titles = NULL;
+
+    fields = PyDict_New();
     if (fields == NULL) {
         return (PyArray_Descr *)PyErr_NoMemory();
     }
     /*
-     * Use PyMapping_GetItemString to support dictproxy objects as well.
+     * Use the mapping protocol to support dictproxy objects as well.
+     * Require real key presence so Counter/defaultdict defaults are not
+     * mistaken for structured dtype "names"/"formats" entries.
      */
-    PyObject *names = PyMapping_GetItemString(obj, "names");
+    names = _mapping_get_item_if_present(obj, "names");
     if (names == NULL) {
         Py_DECREF(fields);
-        /* XXX should check this is a KeyError */
-        PyErr_Clear();
+        if (PyErr_Occurred()) {
+            return NULL;
+        }
         return _convert_from_field_dict(obj, align);
     }
-    PyObject *descrs = PyMapping_GetItemString(obj, "formats");
+    descrs = _mapping_get_item_if_present(obj, "formats");
     if (descrs == NULL) {
         Py_DECREF(fields);
-        /* XXX should check this is a KeyError */
-        PyErr_Clear();
         Py_DECREF(names);
+        if (PyErr_Occurred()) {
+            return NULL;
+        }
         return _convert_from_field_dict(obj, align);
     }
-    int n = PyObject_Length(names);
-    PyObject *offsets = PyMapping_GetItemString(obj, "offsets");
-    if (!offsets) {
-        PyErr_Clear();
+    Py_ssize_t n = PyObject_Length(names);
+    if (n < 0) {
+        goto fail;
     }
-    PyObject *titles = PyMapping_GetItemString(obj, "titles");
-    if (!titles) {
-        PyErr_Clear();
+    offsets = _mapping_get_item_if_present(obj, "offsets");
+    if (offsets == NULL && PyErr_Occurred()) {
+        goto fail;
+    }
+    titles = _mapping_get_item_if_present(obj, "titles");
+    if (titles == NULL && PyErr_Occurred()) {
+        goto fail;
     }
 
-    if ((n > PyObject_Length(descrs))
-        || (offsets && (n > PyObject_Length(offsets)))
-        || (titles && (n > PyObject_Length(titles)))) {
+    Py_ssize_t n_descrs = PyObject_Length(descrs);
+    if (n_descrs < 0) {
+        goto fail;
+    }
+    if (n > n_descrs) {
         PyErr_SetString(PyExc_ValueError,
                 "'names', 'formats', 'offsets', and 'titles' dict "
                 "entries must have the same length");
         goto fail;
+    }
+    if (offsets != NULL) {
+        Py_ssize_t n_offsets = PyObject_Length(offsets);
+        if (n_offsets < 0) {
+            goto fail;
+        }
+        if (n > n_offsets) {
+            PyErr_SetString(PyExc_ValueError,
+                    "'names', 'formats', 'offsets', and 'titles' dict "
+                    "entries must have the same length");
+            goto fail;
+        }
+    }
+    if (titles != NULL) {
+        Py_ssize_t n_titles = PyObject_Length(titles);
+        if (n_titles < 0) {
+            goto fail;
+        }
+        if (n > n_titles) {
+            PyErr_SetString(PyExc_ValueError,
+                    "'names', 'formats', 'offsets', and 'titles' dict "
+                    "entries must have the same length");
+            goto fail;
+        }
     }
 
     /*
      * If a property 'aligned' is in the dict, it overrides the align flag
      * to be True if it not already true.
      */
-    PyObject *tmp = PyMapping_GetItemString(obj, "aligned");
+    PyObject *tmp = _mapping_get_item_if_present(obj, "aligned");
     if (tmp == NULL) {
-        PyErr_Clear();
+        if (PyErr_Occurred()) {
+            goto fail;
+        }
     } else {
         if (tmp == Py_True) {
             align = 1;
@@ -1138,11 +1228,11 @@ _convert_from_dict(PyObject *obj, int align)
     int totalsize = 0;
     int maxalign = 1;
     int has_out_of_order_fields = 0;
-    for (int i = 0; i < n; i++) {
+    for (Py_ssize_t i = 0; i < n; i++) {
         /* Build item to insert (descr, offset, [title])*/
         int len = 2;
         PyObject *title = NULL;
-        PyObject *ind = PyLong_FromLong(i);
+        PyObject *ind = PyLong_FromSsize_t(i);
         if (titles) {
             title=PyObject_GetItem(titles, ind);
             if (title && title != Py_None) {
@@ -1327,9 +1417,12 @@ _convert_from_dict(PyObject *obj, int align)
     }
 
     /* Override the itemsize if provided */
-    tmp = PyMapping_GetItemString(obj, "itemsize");
+    tmp = _mapping_get_item_if_present(obj, "itemsize");
     if (tmp == NULL) {
-        PyErr_Clear();
+        if (PyErr_Occurred()) {
+            Py_DECREF(new);
+            goto fail;
+        }
     } else {
         int itemsize = (int)PyArray_PyIntAsInt(tmp);
         Py_DECREF(tmp);
@@ -1372,10 +1465,13 @@ _convert_from_dict(PyObject *obj, int align)
     }
 
     /* Add the metadata if provided */
-    PyObject *metadata = PyMapping_GetItemString(obj, "metadata");
+    PyObject *metadata = _mapping_get_item_if_present(obj, "metadata");
 
     if (metadata == NULL) {
-        PyErr_Clear();
+        if (PyErr_Occurred()) {
+            Py_DECREF(new);
+            goto fail;
+        }
     }
     else if (new->metadata == NULL) {
         new->metadata = metadata;
