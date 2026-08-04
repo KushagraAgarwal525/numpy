@@ -9359,6 +9359,43 @@ class TestNewBufferProtocol:
         assert_raises((ValueError, BufferError), memoryview, a)
         assert_raises((ValueError, BufferError), memoryview, np.array((3), 'M8[D]'))
 
+    def test_no_format_buffer_unformattable_deprecated(self):
+        # gh-29226: hashlib (and other consumers) request buffers without
+        # PyBUF_FORMAT and previously bypassed the format check. Exporting
+        # such buffers for dtypes that cannot provide a format string is
+        # deprecated.
+        import hashlib
+
+        match = "Exporting a buffer without a format string"
+
+        # StringDType cannot be represented as a buffer; memoryview already
+        # errors, but hashlib used to succeed with colliding hashes.
+        sarr = np.asarray(["a" * 100], dtype="T")
+        with pytest.raises(ValueError, match="cannot include dtype"):
+            memoryview(sarr)
+        with pytest.warns(DeprecationWarning, match=match):
+            hashlib.sha256(sarr)
+
+        # Same for datetime/timedelta and structured dtypes with holes.
+        for arr in (
+            np.array([1], dtype="M8[D]"),
+            np.array([1], dtype="m8[ms]"),
+            np.zeros(1, dtype={"names": ["a", "b"],
+                               "formats": ["i4", "i4"],
+                               "offsets": [0, 2]}),
+        ):
+            with pytest.raises(ValueError):
+                memoryview(arr)
+            with pytest.warns(DeprecationWarning, match=match):
+                hashlib.sha256(arr)
+
+        # Object arrays and plain numeric arrays remain formattable, so
+        # hashlib must not warn.
+        with warnings.catch_warnings():
+            warnings.simplefilter("error", DeprecationWarning)
+            hashlib.sha256(np.asarray(["foo"], dtype=object))
+            hashlib.sha256(np.array([1, 2, 3], dtype="i4"))
+
     def test_export_simple_1d(self):
         x = np.array([1, 2, 3, 4, 5], dtype='i')
         y = memoryview(x)

@@ -1,0 +1,11 @@
+Buffer export without format for unformattable dtypes
+-----------------------------------------------------
+
+Requesting a buffer without ``PyBUF_FORMAT`` for dtypes that cannot provide a
+PEP 3118 format string (for example `numpy.dtypes.StringDType`,
+`numpy.datetime64`, `numpy.timedelta64`, and structured dtypes with overlapping
+fields) is deprecated. Callers such as ``hashlib`` previously bypassed the
+format check and could hash unsafe buffer metadata, leading to collisions for
+`StringDType` arrays. Such exports will raise an error in a future NumPy
+version. Use `ndarray.tobytes` when a raw byte representation is needed, or
+convert to a buffer-compatible dtype first.
