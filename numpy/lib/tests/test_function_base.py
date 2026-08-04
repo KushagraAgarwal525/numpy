@@ -3410,6 +3410,36 @@ class TestInterp:
         assert_raises(ValueError, interp, 0, [0], [1, 2], period=360)
         assert_raises(ValueError, interp, [], [], [3, 4, 5])
 
+    def test_reject_string_inputs(self):
+        # gh-15008: strings must not be silently parsed as floats
+        xp = [1.0, 2.0]
+        fp = [10.0, 20.0]
+        assert_raises(TypeError, interp, "2", xp, fp)
+        assert_raises(TypeError, interp, b"2", xp, fp)
+        assert_raises(TypeError, interp, np.str_("2"), xp, fp)
+        assert_raises(TypeError, interp, np.bytes_(b"2"), xp, fp)
+        assert_raises(TypeError, interp, ["1.5", "2.0"], xp, fp)
+        assert_raises(TypeError, interp, 1.5, ["1", "2"], fp)
+        assert_raises(TypeError, interp, 1.5, xp, ["10", "20"])
+        assert_raises(TypeError, interp, np.array(["1.5"]), xp, fp)
+        assert_raises(TypeError, interp, 1.5, np.array(["1", "2"]), fp)
+        # period path also used asarray(..., dtype=float64)
+        assert_raises(TypeError, interp, "0", xp, fp, period=10)
+        assert_raises(TypeError, interp, 0.0, ["1", "2"], fp, period=10)
+        # numeric inputs still work
+        assert_almost_equal(interp(1.5, xp, fp), 15.0)
+        assert_almost_equal(interp(True, [0.0, 1.0], fp), 20.0)
+        assert_almost_equal(interp(np.float32(1.5), xp, fp), 15.0)
+        # complex fp with string x/xp
+        cfp = [1.0 + 1.0j, 2.0 + 2.0j]
+        assert_raises(TypeError, interp, "1.5", xp, cfp)
+        assert_raises(TypeError, interp, 1.5, ["1", "2"], cfp)
+        assert_almost_equal(interp(1.5, xp, cfp), 1.5 + 1.5j)
+        # StringDType
+        sdt = np.dtypes.StringDType()
+        assert_raises(TypeError, interp, np.array(["1.5"], dtype=sdt), xp, fp)
+        assert_raises(TypeError, interp, 1.5, np.array(["1", "2"], dtype=sdt), fp)
+
     def test_empty_x(self):
         # gh-30316
         assert_array_equal(interp([], [], []), np.array([], dtype=np.float64))
