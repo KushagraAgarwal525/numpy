@@ -705,6 +705,29 @@ class TestMaskedArray:
         finally:
             np.set_printoptions(**oldopts)
 
+    def test_printoptions_precision_with_mask(self):
+        # Regression test for gh-2253: an explicit mask (even all-False)
+        # used to force object conversion and ignore printoptions precision.
+        oldopts = np.get_printoptions()
+        try:
+            np.set_printoptions(precision=3)
+            x = np.array([0.785925693305])
+            mx = np.ma.array(x, mask=[False])
+            assert_equal(str(mx), str(x))
+            assert_('0.786' in repr(mx))
+            assert_('0.785925693305' not in repr(mx))
+
+            # masked_invalid intentionally keeps a full mask (gh-22842)
+            mi = np.ma.masked_invalid(x)
+            assert_equal(str(mi), str(x))
+            assert_('0.786' in repr(mi))
+
+            partial = np.ma.array([0.785925693305, 1.23456],
+                                  mask=[False, True])
+            assert_equal(str(partial), '[0.786 --]')
+        finally:
+            np.set_printoptions(**oldopts)
+
     def test_0d_unicode(self):
         u = 'caf\xe9'
         utype = type(u)
@@ -950,7 +973,7 @@ class TestMaskedArray:
         test = array([(1, (2, 3.0)), (4, (5, 6.0))],
                      mask=[(1, (0, 1)), (0, (1, 0))],
                      dtype=fancydtype)
-        control = "[(--, (2, --)) (4, (--, 6.0))]"
+        control = "[(--, (2, --)) (4, (--, 6.))]"
         assert_equal(str(test), control)
 
         # Test 0-d array with multi-dimensional dtype
@@ -961,7 +984,7 @@ class TestMaskedArray:
                                            [False, False, True]],
                                    False),
                              dtype="int, (2,3)float, float")
-        control = "(0, [[--, 0.0, --], [0.0, 0.0, --]], 0.0)"
+        control = "(0, [[--, 0., --], [0., 0., --]], 0.)"
         assert_equal(str(t_2d0), control)
 
     def test_flatten_structured_array(self):
@@ -1101,8 +1124,8 @@ class TestMaskedArray:
         t_2d = masked_array(data=[([[1, 2], [3, 4]], 1)],
                             mask=[([[False, True], [True, False]], False)],
                             dtype=[('a', '<i4', (2, 2)), ('b', float)])
-        assert_(str(t_2d[0]) == "([[1, --], [--, 4]], 1.0)")
-        assert_(repr(t_2d[0]) == "([[1, --], [--, 4]], 1.0)")
+        assert_(str(t_2d[0]) == "([[1, --], [--, 4]], 1.)")
+        assert_(repr(t_2d[0]) == "([[1, --], [--, 4]], 1.)")
 
         t_ne = masked_array(data=[(1, (1, 1))],
                             mask=[(True, (True, False))],

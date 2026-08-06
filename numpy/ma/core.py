@@ -2507,6 +2507,81 @@ def _recursive_printoption(result, mask, printopt):
         np.copyto(result, printopt, where=mask)
 
 
+class _FormattedPrintValue:
+    """
+    Pre-formatted scalar for object-array printing.
+
+    Converting masked-array data to object dtype for ``--`` placeholders makes
+    floating values print via Python ``repr``, which ignores printoptions
+    precision (gh-2253). Wrapping the already-formatted text avoids quotes
+    while preserving ``array2string`` layout.
+    """
+    __slots__ = ('text',)
+
+    def __init__(self, text):
+        self.text = text
+
+    def __repr__(self):
+        return self.text
+
+    __str__ = __repr__
+
+
+def _recursive_format_print_values(result, data, mask):
+    """
+    Format floating/complex values in a masked print object-array.
+
+    ``result`` is the object-dtype array used for printing; ``data`` and
+    ``mask`` are the matching (possibly edge-truncated) original arrays.
+    Masked entries are already the print placeholder and are left unchanged.
+    """
+    names = data.dtype.names
+    if names is not None:
+        for name in names:
+            curmask = nomask if mask is nomask else mask[name]
+            _recursive_format_print_values(result[name], data[name], curmask)
+        return
+
+    if data.dtype.kind not in 'fc':
+        return
+
+    # Import locally to avoid a circular import at module load time.
+    from numpy._core.arrayprint import _get_format_function
+
+    options = np.get_printoptions()
+    if mask is nomask:
+        mask_arr = None
+        fmt_data = data
+    else:
+        mask_arr = np.asarray(mask, dtype=bool)
+        if mask_arr.shape != data.shape:
+            mask_arr = np.broadcast_to(mask_arr, data.shape)
+        if mask_arr.all():
+            return
+        if mask_arr.any():
+            fmt_data = data[~mask_arr]
+            if fmt_data.size == 0:
+                fmt_data = data
+        else:
+            fmt_data = data
+
+    fmt_data = np.asanyarray(fmt_data)
+    if fmt_data.ndim == 0:
+        fmt_data = fmt_data.reshape(1)
+    format_function = _get_format_function(fmt_data, **options)
+
+    if result.shape == ():
+        if mask_arr is not None and bool(mask_arr):
+            return
+        result[()] = _FormattedPrintValue(format_function(data[()]).strip())
+        return
+
+    for idx in np.ndindex(result.shape):
+        if mask_arr is not None and mask_arr[idx]:
+            continue
+        result[idx] = _FormattedPrintValue(format_function(data[idx]).strip())
+
+
 # For better or worse, these end in a newline
 _legacy_print_templates = {
     'long_std': textwrap.dedent("""\
@@ -4093,6 +4168,9 @@ class MaskedArray(ndarray):
                 rdtype = _replace_dtype_fields(self.dtype, "O")
                 res = data.astype(rdtype)
                 _recursive_printoption(res, mask, masked_print_option)
+                # Object conversion would otherwise print floats via Python
+                # repr and ignore printoptions precision (gh-2253).
+                _recursive_format_print_values(res, data, mask)
         else:
             res = self.filled(self.fill_value)
         return res
@@ -6632,6 +6710,7 @@ class mvoid(MaskedArray):
         data_arr = super()._data
         res = data_arr.astype(rdtype)
         _recursive_printoption(res, self._mask, masked_print_option)
+        _recursive_format_print_values(res, data_arr, self._mask)
         return str(res)
 
     __repr__ = __str__
